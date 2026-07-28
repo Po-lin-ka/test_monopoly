@@ -15,8 +15,9 @@ CREATE OR REPLACE PACKAGE monopoly AS
  PROCEDURE mortgage_properties(p_participant_id IN NUMBER,p_ownership_ids IN number_list); PROCEDURE redeem_property(p_participant_id IN NUMBER,p_ownership_id IN NUMBER);
  PROCEDURE start_auction(p_game_id IN NUMBER,p_cell_id IN NUMBER); PROCEDURE make_bid(p_auction_id IN NUMBER,p_participant_id IN NUMBER,p_amount IN NUMBER); PROCEDURE close_auction(p_auction_id IN NUMBER);
  PROCEDURE check_game_timer(p_game_id IN NUMBER); PROCEDURE handle_timeout(p_game_id IN NUMBER);
- PROCEDURE leave_active_game(p_participant_id IN NUMBER); PROCEDURE declare_bankruptcy(p_participant_id IN NUMBER,p_reason IN VARCHAR2); PROCEDURE finish_or_continue(p_game_id IN NUMBER); PROCEDURE finish_game(p_game_id IN NUMBER,p_winner_id IN NUMBER DEFAULT NULL);
+ PROCEDURE leave_active_game(p_participant_id IN NUMBER); PROCEDURE disconnect_player(p_participant_id IN NUMBER); PROCEDURE declare_bankruptcy(p_participant_id IN NUMBER,p_reason IN VARCHAR2); PROCEDURE finish_or_continue(p_game_id IN NUMBER); PROCEDURE finish_game(p_game_id IN NUMBER,p_winner_id IN NUMBER DEFAULT NULL);
  PROCEDURE send_message(p_participant_id IN NUMBER,p_text IN VARCHAR2); FUNCTION get_chat(p_participant_id IN NUMBER) RETURN SYS_REFCURSOR;
+ FUNCTION get_action_log(p_participant_id IN NUMBER) RETURN SYS_REFCURSOR;
  FUNCTION get_player_stats(p_user_id IN NUMBER) RETURN SYS_REFCURSOR; FUNCTION get_leaderboard RETURN SYS_REFCURSOR; FUNCTION get_game_history(p_user_id IN NUMBER) RETURN SYS_REFCURSOR;
  PROCEDURE add_action(p_game_id IN NUMBER,p_participant_id IN NUMBER DEFAULT NULL,p_cell_id IN NUMBER DEFAULT NULL,p_action_code IN VARCHAR2,p_amount IN NUMBER DEFAULT NULL); PROCEDURE return_properties_to_bank(p_participant_id IN NUMBER);
 END monopoly;

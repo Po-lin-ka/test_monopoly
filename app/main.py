@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 import sys
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
@@ -24,6 +25,10 @@ QLabel#title { color: #172554; font-size: 28px; font-weight: 700; }
 QLabel#subtitle { color: #64748b; font-size: 14px; }
 QLabel#roomTitle { color: #172554; font-size: 23px; font-weight: 700; }
 QLabel#countdown { color: #c2410c; background: #ffedd5; border-radius: 10px; padding: 10px; font-size: 17px; font-weight: 700; }
+QLabel#yourTurn { color: white; background: #16a34a; border-radius: 12px; padding: 12px; font-size: 20px; font-weight: 800; }
+QLabel#waitingTurn { color: #1e3a8a; background: #dbeafe; border-radius: 12px; padding: 12px; font-size: 18px; font-weight: 700; }
+QLabel#balance { color: #166534; background: #dcfce7; border-radius: 10px; padding: 10px; font-size: 17px; font-weight: 700; }
+QLabel#event { color: #78350f; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 10px; padding: 10px; font-weight: 700; }
 QPushButton { background: #e8eef8; border: 0; border-radius: 9px; padding: 10px 16px; color: #24324a; font-weight: 600; }
 QPushButton:hover { background: #dbe7f7; }
 QPushButton:disabled { color: #94a3b8; background: #edf1f6; }
@@ -100,7 +105,7 @@ class BoardWidget(QWidget):
         self.players = []
         self.current_participant = None
         self.cell_rects = []
-        self.setMinimumSize(680, 600)
+        self.setMinimumSize(900, 720)
         self.setToolTip("Игровое поле: 12 клеток по кругу")
 
     def set_state(self, cells, players, current_participant=None):
@@ -162,7 +167,7 @@ class BoardWidget(QWidget):
             name = str(cell["название"])
             if len(name) > 18:
                 name = name[:17] + "…"
-            painter.drawText(rect.adjusted(7, 5, -7, -28), Qt.AlignCenter | Qt.TextWordWrap, f'{cell["позиция"]}. {name}')
+            painter.drawText(rect.adjusted(7, 5, -7, -28), Qt.AlignCenter | Qt.TextWordWrap, name)
             details = []
             if cell.get("цена_покупки") is not None:
                 details.append(f'₽{cell["цена_покупки"]}')
@@ -220,8 +225,8 @@ class CreateDialog(QDialog):
 class Window(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.resize(1280, 820)
-        self.setMinimumSize(960, 650)
+        self.resize(1540, 980)
+        self.setMinimumSize(1180, 760)
         self.setWindowTitle("Monopoly Lite")
         self.setStyleSheet(STYLE)
         self.db = Database()
@@ -230,6 +235,10 @@ class Window(QMainWindow):
         self.part = None
         self.game = None
         self.state_row = {}
+        self.previous_positions = {}
+        self.last_action_id = 0
+        self.poll_count = 0
+        self.disconnected = False
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
         self.login_page = self.login_ui()
@@ -353,23 +362,47 @@ class Window(QMainWindow):
         right = QVBoxLayout(right_card)
         self.info = QLabel()
         self.info.setObjectName("roomTitle")
+        status_row = QHBoxLayout()
+        self.turn_label = QLabel("Ожидание хода")
+        self.turn_label.setObjectName("waitingTurn")
+        self.balance_label = QLabel("Баланс: —")
+        self.balance_label.setObjectName("balance")
+        status_row.addWidget(self.turn_label, 2)
+        status_row.addWidget(self.balance_label, 1)
+        self.event_banner = QLabel("Игра началась")
+        self.event_banner.setObjectName("event")
+        self.event_banner.setWordWrap(True)
         self.board = BoardWidget()
         self.players = QTableWidget()
         setup_table(self.players)
         left.addWidget(self.info)
-        left.addWidget(QLabel("Игровое поле"))
-        left.addWidget(self.board, 2)
+        left.addLayout(status_row)
+        left.addWidget(self.event_banner)
+        left.addWidget(self.board, 4)
         left.addWidget(QLabel("Игроки"))
         left.addWidget(self.players, 1)
-        actions = [
-            ("Бросить кубик", self.roll, "primary"), ("Купить", self.buy, "success"),
-            ("Отказаться от покупки", self.decline_buy, None), ("Улучшить", self.improve, None),
-            ("Отказаться от улучшения", self.decline_improve, None), ("Завершить ход", self.end, None),
-            ("Собственность", self.properties, None), ("Ставка", self.bid, None),
-            ("Покинуть игру", self.leave, "danger"),
+        right.addWidget(QLabel("Доступные действия"))
+        self.roll_button = button("🎲 Бросить кубик", self.roll, "primary")
+        self.buy_button = button("Купить собственность", self.buy, "success")
+        self.decline_buy_button = button("Отказаться — открыть аукцион", self.decline_buy)
+        self.improve_button = button("Построить улучшение", self.improve, "success")
+        self.decline_improve_button = button("Не улучшать", self.decline_improve)
+        self.end_button = button("Завершить ход", self.end, "primary")
+        self.properties_button = button("Управление собственностью", self.properties)
+        self.bid_button = button("Сделать ставку на аукционе", self.bid, "success")
+        self.action_buttons = [
+            self.roll_button, self.buy_button, self.decline_buy_button,
+            self.improve_button, self.decline_improve_button, self.end_button,
+            self.properties_button, self.bid_button,
         ]
-        for text, slot, kind in actions:
-            right.addWidget(button(text, slot, kind))
+        for action_button in self.action_buttons:
+            right.addWidget(action_button)
+        right.addWidget(button("Покинуть игру", self.leave, "danger"))
+        right.addWidget(QLabel("Журнал событий"))
+        self.action_log = QTextEdit()
+        self.action_log.setReadOnly(True)
+        self.action_log.setMinimumHeight(170)
+        right.addWidget(self.action_log, 2)
         self.chat = QTextEdit()
         self.chat.setReadOnly(True)
         self.msg = QLineEdit()
@@ -380,12 +413,23 @@ class Window(QMainWindow):
         right.addWidget(self.chat, 1)
         right.addWidget(self.msg)
         right.addWidget(send)
-        main_layout.addLayout(left, 3)
+        main_layout.addLayout(left, 4)
         main_layout.addWidget(right_card, 1)
         return page
 
     def alert(self, text, error=False):
-        (QMessageBox.critical if error else QMessageBox.information)(self, "Monopoly", text)
+        if not error:
+            QMessageBox.information(self, "Monopoly", text)
+            return
+        clean = str(text).split("ORA-06512")[0].strip()
+        clean = re.sub(r"ORA-\d+:\s*", "", clean).strip()
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Действие сейчас недоступно")
+        box.setText("Не удалось выполнить действие")
+        box.setInformativeText(clean)
+        box.setStandardButtons(QMessageBox.Ok)
+        box.exec()
 
     def act(self, operation):
         try:
@@ -482,6 +526,7 @@ class Window(QMainWindow):
 
     def open_room(self, game_id):
         """Один и тот же переход в лобби для хозяина и присоединившихся игроков."""
+        self.disconnected = False
         self.game = int(game_id)
         self.part = self.s.participant(self.user, self.game)
         self.state_row = {}
@@ -495,8 +540,10 @@ class Window(QMainWindow):
         self.act(lambda: self.s.ready(self.part, 0 if ready else 1))
 
     def poll(self, force=False):
+        self.poll_count += 1
         if self.stack.currentWidget() is self.rooms_page:
-            self.refresh_rooms()
+            if self.poll_count % 5 == 0:
+                self.refresh_rooms()
             return
         if self.stack.currentWidget() not in (self.lobby_page, self.game_page) or not self.part:
             return
@@ -516,18 +563,103 @@ class Window(QMainWindow):
             elif status in ("ЗАБРОШЕНА", "ЗАВЕРШЕНА"):
                 self.return_to_rooms()
                 return
-            board_rows = self.s.board(self.part)
             player_rows = self.s.players(self.part)
+            board_rows = self.s.board(self.part) if self.poll_count % 2 == 0 or not self.board.cells else self.board.cells
             self.board.set_state(board_rows, player_rows, self.state_row.get("id_текущего_участника"))
-            fill(self.players, player_rows)
+            self.update_game_status(player_rows)
+            self.update_movements(player_rows)
+            display_players = [{
+                "Игрок": row["логин"],
+                "Баланс": row["баланс"],
+                "Позиция": row["позиция"],
+                "Клетка": row["клетка"],
+                "Статус": row["статус"],
+                "Очередь": row["очередь_хода"],
+            } for row in player_rows]
+            fill(self.players, display_players)
             self.info.setText(f'{self.state_row["название"]} · {self.state_row["статус_игры"]} · {self.state_row.get("состояние_хода") or "-"}')
-            try:
-                self.chat.setPlainText("\n".join(f'[{x["дата_время"]}] {x["логин"]}: {x["текст"]}' for x in self.s.chat(self.part)))
-            except DatabaseError:
-                pass
+            if hasattr(self.s, "actions"):
+                self.update_action_log(self.s.actions(self.part))
+            if self.poll_count % 3 == 0:
+                try:
+                    self.chat.setPlainText("\n".join(f'[{x["дата_время"]:%H:%M}] {x["логин"]}: {x["текст"]}' for x in self.s.chat(self.part)))
+                except DatabaseError:
+                    pass
         except DatabaseError:
             if force:
                 raise
+
+    def update_game_status(self, players):
+        current_id = self.state_row.get("id_текущего_участника")
+        current = next((row for row in players if current_id is not None and int(row["id_участника"]) == int(current_id)), None)
+        me = next((row for row in players if int(row["id_участника"]) == self.part), None)
+        my_turn = current_id is not None and int(current_id) == self.part
+        if my_turn:
+            self.turn_label.setText("ВАШ ХОД")
+            self.turn_label.setObjectName("yourTurn")
+        else:
+            self.turn_label.setText(f'Сейчас ходит: {current["логин"]}' if current else "Ожидание следующего хода")
+            self.turn_label.setObjectName("waitingTurn")
+        self.turn_label.style().unpolish(self.turn_label)
+        self.turn_label.style().polish(self.turn_label)
+        self.balance_label.setText(f'Ваш баланс: {me["баланс"]} ₽' if me else "Баланс: —")
+        self.update_action_buttons(my_turn, me)
+
+    def update_action_buttons(self, my_turn, me):
+        for action_button in self.action_buttons:
+            action_button.hide()
+            action_button.setEnabled(False)
+        state = self.state_row.get("код_состояния_хода")
+        state_buttons = {
+            "ОЖИДАНИЕ_БРОСКА": [self.roll_button],
+            "ОЖИДАНИЕ_ПОКУПКИ": [self.buy_button, self.decline_buy_button],
+            "ОЖИДАНИЕ_УЛУЧШЕНИЯ": [self.improve_button, self.decline_improve_button],
+            "ЗАВЕРШЕНИЕ_ХОДА": [self.end_button],
+        }
+        for action_button in state_buttons.get(state, []):
+            action_button.show()
+            action_button.setEnabled(my_turn)
+        if state == "ПРОВЕДЕНИЕ_АУКЦИОНА" and me and me.get("код_статуса_участника") == "АКТИВЕН" and not my_turn:
+            self.bid_button.show()
+            self.bid_button.setEnabled(True)
+        if my_turn and state in ("ОЖИДАНИЕ_БРОСКА", "ПОКРЫТИЕ_ДОЛГА"):
+            self.properties_button.show()
+            self.properties_button.setEnabled(True)
+
+    def update_movements(self, players):
+        current_positions = {int(row["id_участника"]): int(row["позиция"]) for row in players}
+        for row in players:
+            participant_id = int(row["id_участника"])
+            old_position = self.previous_positions.get(participant_id)
+            new_position = int(row["позиция"])
+            if old_position is not None and old_position != new_position:
+                self.event_banner.setText(f'🚶 {row["логин"]} переместился: клетка {old_position} → {new_position} ({row["клетка"]})')
+        self.previous_positions = current_positions
+
+    @staticmethod
+    def action_text(action):
+        actor = action.get("логин") or "Банк"
+        cell = f' · {action["клетка"]}' if action.get("клетка") else ""
+        amount = f' · {action["сумма"]} ₽' if action.get("сумма") is not None else ""
+        return f'[{action["дата_время"]:%H:%M:%S}] {actor}: {action["действие"]}{cell}{amount}'
+
+    def update_action_log(self, actions):
+        self.action_log.setPlainText("\n".join(self.action_text(action) for action in actions))
+        if not actions:
+            return
+        newest = actions[-1]
+        newest_id = int(newest["id_действия"])
+        important = {
+            "БРОСОК_КУБИКА", "ПОКУПКА_СОБСТВЕННОСТИ", "ОТКАЗ_ОТ_ПОКУПКИ",
+            "ОПЛАТА_АРЕНДЫ", "КАРТА_ШАНСА", "АУКЦИОН", "ПОКУПКА_УЛУЧШЕНИЯ",
+            "БАНКРОТСТВО", "ВЫХОД_УЧАСТНИКА",
+        }
+        if newest_id > self.last_action_id and newest.get("код_действия") in important:
+            message = self.action_text(newest).split("] ", 1)[-1]
+            if newest["код_действия"] == "ОТКАЗ_ОТ_ПОКУПКИ":
+                message += " · Открывается аукцион"
+            self.event_banner.setText(message)
+        self.last_action_id = max(self.last_action_id, newest_id)
 
     def poll_lobby(self, status):
         self.stack.setCurrentWidget(self.lobby_page)
@@ -567,6 +699,8 @@ class Window(QMainWindow):
     def return_to_rooms(self):
         self.part = self.game = None
         self.state_row = {}
+        self.previous_positions = {}
+        self.last_action_id = 0
         self.stack.setCurrentWidget(self.rooms_page)
         self.refresh_rooms()
 
@@ -577,13 +711,16 @@ class Window(QMainWindow):
 
     def roll(self):
         try:
-            self.alert(f"Выпало: {self.s.roll(self.part)}")
+            dice = self.s.roll(self.part)
+            self.event_banner.setText(f"🎲 Вы бросили кубик: выпало {dice}. Фишка перемещается…")
             self.poll(True)
         except DatabaseError as exc:
             self.alert(str(exc), True)
 
     def buy(self): self.act(lambda: self.s.buy(self.part, self.current_cell()))
-    def decline_buy(self): self.act(lambda: self.s.decline_buy(self.part, self.current_cell()))
+    def decline_buy(self):
+        self.event_banner.setText("Вы отказались от покупки. Открывается аукцион для остальных игроков…")
+        self.act(lambda: self.s.decline_buy(self.part, self.current_cell()))
     def improve(self): self.act(lambda: self.s.improve(self.part, self.current_cell()))
     def decline_improve(self): self.act(lambda: self.s.decline_improve(self.part, self.current_cell()))
     def end(self): self.act(lambda: self.s.end(self.game))
@@ -660,8 +797,31 @@ class Window(QMainWindow):
             self.alert(str(exc), True)
 
     def closeEvent(self, event):
+        self.disconnect_on_window_close()
         self.db.close()
         super().closeEvent(event)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if self.isMinimized():
+            self.disconnect_on_window_close()
+
+    def disconnect_on_window_close(self):
+        if self.disconnected or not self.part:
+            return
+        self.disconnected = True
+        try:
+            status = self.state_row.get("код_статуса_игры")
+            if status == "АКТИВНА" and hasattr(self.s, "disconnect"):
+                self.s.disconnect(self.part)
+            elif status in ("ОЖИДАНИЕ", "ПРОВЕРКА_ГОТОВНОСТИ"):
+                self.s.leave_lobby(self.part)
+        except (DatabaseError, AttributeError):
+            pass
+        self.part = self.game = None
+        self.state_row = {}
+        if self.user:
+            self.stack.setCurrentWidget(self.rooms_page)
 
 
 def main():

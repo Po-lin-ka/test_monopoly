@@ -60,11 +60,31 @@ if __name__ == "__main__":
 
             cursor.callproc("monopoly.leave_active_game", [participants[user_ids[0]]])
             cursor.execute(
+                'SELECT "КОД_СТАТУСА_УЧАСТНИКА" FROM "УЧАСТНИКИ" WHERE "ID_УЧАСТНИКА"=:participant',
+                participant=participants[user_ids[0]],
+            )
+            assert cursor.fetchone()[0] == "БАНКРОТ"
+            cursor.execute(
                 'SELECT "КОД_СТАТУСА_ИГРЫ" FROM "ИГРЫ" WHERE "ID_ИГРЫ"=:game_id',
                 game_id=game_id,
             )
             assert cursor.fetchone()[0] == "АКТИВНА"
-            print("Лобби, готовность, отмена, таймер и выход хоста: OK")
+            log_cursor = cursor.callfunc(
+                "monopoly.get_action_log", oracledb.DB_TYPE_CURSOR,
+                [participants[user_ids[1]]],
+            )
+            try:
+                assert len(log_cursor.fetchall()) > 0
+            finally:
+                log_cursor.close()
+
+            cursor.callproc("monopoly.disconnect_player", [participants[user_ids[1]]])
+            cursor.execute(
+                'SELECT "КОД_СТАТУСА_УЧАСТНИКА" FROM "УЧАСТНИКИ" WHERE "ID_УЧАСТНИКА"=:participant',
+                participant=participants[user_ids[1]],
+            )
+            assert cursor.fetchone()[0] == "БАНКРОТ"
+            print("Лобби, таймер, журнал и автоматическое банкротство при отключении: OK")
 
             db.connection.rollback()
     except Exception:

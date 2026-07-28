@@ -25,6 +25,8 @@ class FakeService:
             "код_статуса_игры": self.game_status,
             "статус_игры": "Ожидание" if self.game_status == "ОЖИДАНИЕ" else "Активна",
             "состояние_хода": None,
+            "код_состояния_хода": "ОЖИДАНИЕ_БРОСКА" if self.game_status == "АКТИВНА" else None,
+            "id_текущего_участника": 20 if self.game_status == "АКТИВНА" else None,
             "id_хоста": 10,
         }]
 
@@ -32,8 +34,13 @@ class FakeService:
         return [{
             "id_участника": 20,
             "логин": "host",
-            "код_статуса_участника": "В_ЛОББИ",
+            "код_статуса_участника": "АКТИВЕН" if self.game_status == "АКТИВНА" else "В_ЛОББИ",
             "готов": 0,
+            "баланс": 1500,
+            "позиция": 1,
+            "клетка": "Старт",
+            "статус": "Активен" if self.game_status == "АКТИВНА" else "В лобби",
+            "очередь_хода": 1 if self.game_status == "АКТИВНА" else None,
         }]
 
     def list_games(self):
@@ -101,6 +108,11 @@ def test_active_game_opens_game_page(monkeypatch):
     window.poll(True)
 
     assert window.stack.currentWidget() is window.game_page
+    assert window.turn_label.text() == "ВАШ ХОД"
+    assert window.balance_label.text() == "Ваш баланс: 1500 ₽"
+    assert not window.roll_button.isHidden()
+    assert window.roll_button.isEnabled()
+    assert window.buy_button.isHidden()
     window.close()
 
 
@@ -214,5 +226,5 @@ def test_board_renders_twelve_cells_and_player_tokens():
     assert len(widget.cell_rects) == 12
     assert not image.isNull()
     assert image.width() == 900
-    assert image.height() == 700
+    assert image.height() == widget.height()
     widget.close()
