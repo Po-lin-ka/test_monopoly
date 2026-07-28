@@ -7,8 +7,8 @@ import sys
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QDialogButtonBox, QFormLayout, QFrame,
-    QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow,
+    QApplication, QButtonGroup, QDialog, QDialogButtonBox, QFormLayout, QFrame,
+    QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow,
     QMessageBox, QPushButton, QSpinBox, QStackedWidget, QTableWidget,
     QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
 )
@@ -17,6 +17,7 @@ from .config import settings
 from .db import Database, DatabaseError
 from .service import GameService
 
+APP_VERSION = "2026.07.29-3"
 
 STYLE = """
 QMainWindow, QWidget { background: #f4f7fb; color: #172033; font: 14px "DejaVu Sans"; }
@@ -38,6 +39,10 @@ QPushButton#success { background: #16a34a; color: white; }
 QPushButton#success:hover { background: #15803d; }
 QPushButton#danger { background: #dc2626; color: white; }
 QPushButton#danger:hover { background: #b91c1c; }
+QPushButton#countChoice { background: white; border: 2px solid #cbd5e1; font-size: 20px; padding: 12px 24px; }
+QPushButton#countChoice:checked { background: #2563eb; border-color: #1d4ed8; color: white; }
+QFrame#playerCard { background: white; border: 2px solid #dbe3ee; border-radius: 14px; }
+QFrame#readyCard { background: #f0fdf4; border: 2px solid #22c55e; border-radius: 14px; }
 QLineEdit, QSpinBox, QTextEdit { background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 9px; selection-background-color: #2563eb; }
 QLineEdit:focus, QSpinBox:focus, QTextEdit:focus { border: 2px solid #3b82f6; }
 QTableWidget { background: white; alternate-background-color: #f8fafc; border: 1px solid #dce4f0; border-radius: 10px; gridline-color: #e5eaf2; }
@@ -207,27 +212,41 @@ class CreateDialog(QDialog):
         self.setMinimumWidth(420)
         form = QFormLayout(self)
         self.name = QLineEdit("Новая игра")
-        self.max = QSpinBox()
-        self.max.setRange(2, 4)
-        self.max.setValue(4)
+        count_widget = QWidget()
+        count_layout = QHBoxLayout(count_widget)
+        count_layout.setContentsMargins(0, 0, 0, 0)
+        self.count_group = QButtonGroup(self)
+        self.count_group.setExclusive(True)
+        self.count_buttons = {}
+        for count in (2, 3, 4):
+            count_button = QPushButton(str(count))
+            count_button.setObjectName("countChoice")
+            count_button.setCheckable(True)
+            count_button.setChecked(count == 4)
+            self.count_group.addButton(count_button, count)
+            self.count_buttons[count] = count_button
+            count_layout.addWidget(count_button)
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
         self.password.setPlaceholderText("Необязательно")
         form.addRow("Название", self.name)
-        form.addRow("Максимум игроков", self.max)
+        form.addRow("Количество игроков", count_widget)
         form.addRow("Пароль", self.password)
         controls = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         controls.accepted.connect(self.accept)
         controls.rejected.connect(self.reject)
         form.addRow(controls)
 
+    def player_count(self):
+        return self.count_group.checkedId()
+
 
 class Window(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.resize(1540, 980)
-        self.setMinimumSize(1180, 760)
-        self.setWindowTitle("Monopoly Lite")
+        self.resize(1760, 1060)
+        self.setMinimumSize(1280, 800)
+        self.setWindowTitle(f"Monopoly Lite · версия {APP_VERSION}")
         self.setStyleSheet(STYLE)
         self.db = Database()
         self.s = GameService(self.db)
@@ -328,8 +347,10 @@ class Window(QMainWindow):
         self.countdown.setObjectName("countdown")
         self.countdown.setAlignment(Qt.AlignCenter)
         self.countdown.hide()
-        self.lobby_players = QTableWidget()
-        setup_table(self.lobby_players)
+        self.players_panel = QWidget()
+        self.player_cards_layout = QGridLayout(self.players_panel)
+        self.player_cards_layout.setSpacing(16)
+        self.lobby_player_cards = []
         controls = QHBoxLayout()
         self.ready_button = button("Я готов", self.toggle_ready, "success")
         self.ready_button.setEnabled(False)
@@ -347,7 +368,7 @@ class Window(QMainWindow):
         layout.addWidget(self.countdown)
         layout.addSpacing(8)
         layout.addWidget(QLabel("Игроки в комнате"))
-        layout.addWidget(self.lobby_players)
+        layout.addWidget(self.players_panel, 1)
         layout.addWidget(hint)
         layout.addLayout(controls)
         return page
@@ -501,7 +522,7 @@ class Window(QMainWindow):
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            game_id = self.s.create_game(self.user, dialog.name.text(), dialog.max.value(), dialog.password.text())
+            game_id = self.s.create_game(self.user, dialog.name.text(), dialog.player_count(), dialog.password.text())
             self.open_room(game_id)
         except DatabaseError as exc:
             self.alert(str(exc), True)
@@ -616,9 +637,10 @@ class Window(QMainWindow):
             "ОЖИДАНИЕ_УЛУЧШЕНИЯ": [self.improve_button, self.decline_improve_button],
             "ЗАВЕРШЕНИЕ_ХОДА": [self.end_button],
         }
-        for action_button in state_buttons.get(state, []):
-            action_button.show()
-            action_button.setEnabled(my_turn)
+        if my_turn:
+            for action_button in state_buttons.get(state, []):
+                action_button.show()
+                action_button.setEnabled(True)
         if state == "ПРОВЕДЕНИЕ_АУКЦИОНА" and me and me.get("код_статуса_участника") == "АКТИВЕН" and not my_turn:
             self.bid_button.show()
             self.bid_button.setEnabled(True)
@@ -669,11 +691,7 @@ class Window(QMainWindow):
             self.return_to_rooms()
             return
         players = [row for row in all_players if row["код_статуса_участника"] == "В_ЛОББИ"]
-        display = [{
-            "Игрок": f'{"★ " if int(row["id_участника"]) == self.part else ""}{row["логин"]}',
-            "Готовность": "✓ Готов" if int(row["готов"]) else "Ожидаем",
-        } for row in players]
-        fill(self.lobby_players, display)
+        self.render_player_cards(players)
         self.lobby_title.setText(self.state_row["название"])
         ready_count = sum(int(row["готов"]) for row in players)
         self.lobby_info.setText(f"Комната №{self.game}  •  игроков {len(players)}  •  готовы {ready_count}/{len(players)}")
@@ -695,6 +713,47 @@ class Window(QMainWindow):
             self.s.timer(self.game)
         else:
             self.countdown.hide()
+
+    def render_player_cards(self, players):
+        while self.player_cards_layout.count():
+            item = self.player_cards_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.lobby_player_cards = []
+        for index, player in enumerate(players):
+            ready = bool(int(player["готов"]))
+            card = QFrame()
+            card.setObjectName("readyCard" if ready else "playerCard")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(20, 18, 20, 18)
+            avatar = QLabel(str(player["логин"])[0].upper())
+            avatar.setAlignment(Qt.AlignCenter)
+            avatar.setFixedSize(58, 58)
+            color = BoardWidget.TOKEN_COLORS[index % len(BoardWidget.TOKEN_COLORS)]
+            avatar.setStyleSheet(f"background:{color}; color:white; border-radius:29px; font-size:24px; font-weight:800;")
+            name = QLabel(str(player["логин"]))
+            name.setAlignment(Qt.AlignCenter)
+            name.setStyleSheet("font-size:18px; font-weight:700;")
+            labels = []
+            if int(player["id_участника"]) == self.part:
+                labels.append("Это вы")
+            if int(player.get("id_пользователя", -1)) == int(self.state_row["id_хоста"]):
+                labels.append("Хозяин")
+            role = QLabel(" • ".join(labels) or "Игрок")
+            role.setAlignment(Qt.AlignCenter)
+            role.setObjectName("subtitle")
+            status = QLabel("✓ ГОТОВ" if ready else "Ожидает готовности")
+            status.setAlignment(Qt.AlignCenter)
+            status.setStyleSheet(
+                "color:#15803d; font-weight:800;" if ready
+                else "color:#64748b; font-weight:600;"
+            )
+            card_layout.addWidget(avatar, alignment=Qt.AlignCenter)
+            card_layout.addWidget(name)
+            card_layout.addWidget(role)
+            card_layout.addWidget(status)
+            self.player_cards_layout.addWidget(card, index // 2, index % 2)
+            self.lobby_player_cards.append(card)
 
     def return_to_rooms(self):
         self.part = self.game = None
@@ -827,8 +886,9 @@ class Window(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     try:
+        print(f"Запущена Monopoly Lite, версия интерфейса {APP_VERSION}")
         window = Window()
-        window.show()
+        window.showMaximized()
         return app.exec()
     except Exception as exc:
         QMessageBox.critical(None, "Ошибка", str(exc))

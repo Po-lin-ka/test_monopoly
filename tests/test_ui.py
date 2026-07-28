@@ -17,6 +17,7 @@ class FakeService:
         self.deleted = None
         self.game_status = "ОЖИДАНИЕ"
         self.ready_call = None
+        self.current_participant = 20
 
     def state(self, _participant):
         return [{
@@ -26,13 +27,14 @@ class FakeService:
             "статус_игры": "Ожидание" if self.game_status == "ОЖИДАНИЕ" else "Активна",
             "состояние_хода": None,
             "код_состояния_хода": "ОЖИДАНИЕ_БРОСКА" if self.game_status == "АКТИВНА" else None,
-            "id_текущего_участника": 20 if self.game_status == "АКТИВНА" else None,
+            "id_текущего_участника": self.current_participant if self.game_status == "АКТИВНА" else None,
             "id_хоста": 10,
         }]
 
     def players(self, _participant):
         return [{
             "id_участника": 20,
+            "id_пользователя": 10,
             "логин": "host",
             "код_статуса_участника": "АКТИВЕН" if self.game_status == "АКТИВНА" else "В_ЛОББИ",
             "готов": 0,
@@ -93,7 +95,7 @@ def test_host_opens_lobby_and_sees_delete_button(monkeypatch):
     window.poll(True)
 
     assert window.stack.currentWidget() is window.lobby_page
-    assert window.lobby_players.rowCount() == 1
+    assert len(window.lobby_player_cards) == 1
     assert not window.delete_button.isHidden()
     assert window.ready_button.isHidden()
     window.close()
@@ -113,6 +115,20 @@ def test_active_game_opens_game_page(monkeypatch):
     assert not window.roll_button.isHidden()
     assert window.roll_button.isEnabled()
     assert window.buy_button.isHidden()
+    window.close()
+
+
+def test_turn_action_is_hidden_from_waiting_player(monkeypatch):
+    window = make_window(monkeypatch)
+    window.user, window.part, window.game = 10, 20, 7
+    window.s.game_status = "АКТИВНА"
+    window.s.current_participant = 21
+    window.stack.setCurrentWidget(window.lobby_page)
+
+    window.poll(True)
+
+    assert window.turn_label.text() == "Ожидание следующего хода"
+    assert all(action.isHidden() for action in window.action_buttons)
     window.close()
 
 
@@ -188,9 +204,22 @@ def test_host_goes_directly_to_lobby_after_creation(monkeypatch):
     assert window.game == 7
     assert window.part == 20
     assert window.stack.currentWidget() is window.lobby_page
-    assert window.lobby_players.rowCount() == 1
-    assert window.lobby_players.item(0, 0).text().endswith("host")
+    assert len(window.lobby_player_cards) == 1
+    assert any(label.text() == "host" for label in window.lobby_player_cards[0].findChildren(main.QLabel))
     window.close()
+
+
+def test_player_count_uses_three_highlighted_buttons():
+    QApplication.instance() or QApplication([])
+    dialog = main.CreateDialog()
+
+    assert set(dialog.count_buttons) == {2, 3, 4}
+    assert dialog.player_count() == 4
+    dialog.count_buttons[3].click()
+    assert dialog.player_count() == 3
+    assert dialog.count_buttons[3].isChecked()
+    assert not dialog.count_buttons[4].isChecked()
+    dialog.close()
 
 
 def test_board_renders_twelve_cells_and_player_tokens():
