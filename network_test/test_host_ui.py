@@ -21,18 +21,18 @@ if __name__ == "__main__":
         assert window.game is not None
         assert window.part is not None
         assert window.stack.currentWidget() is window.lobby_page
-        assert len(window.lobby_player_cards) == 1
+        assert len(window.lobby_player_cards) == 4
         assert window.ready_button.isHidden()
         window.s.register("ui_guest_smoke", "test-password")
         guest = window.s.login("ui_guest_smoke", "test-password")
         window.s.join(guest, window.game, "")
         window.poll(True)
-        assert len(window.lobby_player_cards) == 2
+        assert len(window.lobby_player_cards) == 4
         assert not window.ready_button.isHidden()
         assert window.ready_button.isEnabled()
         print(
             "Хост после создания сразу в лобби:",
-            f"game={window.game}, participant={window.part}, players={len(window.lobby_player_cards)}, ready_button=visible",
+            f"game={window.game}, participant={window.part}, players=2, slots={len(window.lobby_player_cards)}, ready_button=visible",
         )
     finally:
         window.close()

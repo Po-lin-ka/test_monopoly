@@ -8,5 +8,5 @@ class Settings:
     user: str=os.getenv('ORACLE_USER','monopoly')
     password: str=os.getenv('ORACLE_PASSWORD','123321')
     dsn: str=os.getenv('ORACLE_DSN','localhost:1521/FREEPDB1')
-    poll_interval_ms: int=int(os.getenv('POLL_INTERVAL_MS','1000'))
+    poll_interval_ms: int=int(os.getenv('POLL_INTERVAL_MS','1500'))
 settings=Settings()

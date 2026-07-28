@@ -32,7 +32,11 @@ class GameService:
     def leave_lobby(self,p): self.db.callproc('monopoly.leave_lobby',[p])
     def delete_room(self,u,g): self.db.callproc('monopoly.abandon_waiting_game',[u,g])
     def roll(self,p):
-        out=self.db.connection.cursor().var(oracledb.NUMBER); r=self.db.callproc('monopoly.roll_and_move',[p,out]); return int(r[1].getvalue())
+        with self.db.cursor() as cursor:
+            out=cursor.var(oracledb.NUMBER)
+            result=self.db.callproc('monopoly.roll_and_move',[p,out])
+            value=result[1]
+            return int(value.getvalue() if hasattr(value,'getvalue') else value)
     def buy(self,p,c): self.db.callproc('monopoly.buy_property',[p,c])
     def decline_buy(self,p,c): self.db.callproc('monopoly.decline_purchase',[p,c])
     def improve(self,p,c): self.db.callproc('monopoly.build_house',[p,c])

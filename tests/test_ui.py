@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -18,6 +19,7 @@ class FakeService:
         self.game_status = "ОЖИДАНИЕ"
         self.ready_call = None
         self.current_participant = 20
+        self.left_game = None
 
     def state(self, _participant):
         return [{
@@ -76,6 +78,9 @@ class FakeService:
 
     def ready(self, participant, value):
         self.ready_call = (participant, value)
+
+    def leave_game(self, participant):
+        self.left_game = participant
 
 
 def make_window(monkeypatch):
@@ -254,6 +259,46 @@ def test_board_renders_twelve_cells_and_player_tokens():
 
     assert len(widget.cell_rects) == 12
     assert not image.isNull()
-    assert image.width() == 900
+    assert image.width() == widget.width()
     assert image.height() == widget.height()
     widget.close()
+
+
+def test_dice_action_is_not_formatted_as_money():
+    text = main.Window.action_text({
+        "дата_время": datetime(2026, 7, 29, 12, 0, 0),
+        "логин": "player",
+        "действие": "Бросок кубика",
+        "код_действия": "БРОСОК_КУБИКА",
+        "клетка": None,
+        "сумма": 6,
+    })
+
+    assert "выпало 6" in text
+    assert "6 ₽" not in text
+
+
+def test_action_log_can_be_collapsed(monkeypatch):
+    window = make_window(monkeypatch)
+    assert not window.action_log.isHidden()
+
+    window.toggle_action_log()
+
+    assert window.action_log.isHidden()
+    assert window.log_toggle.text().startswith("▸")
+    window.close()
+
+
+def test_leave_game_requires_confirmation(monkeypatch):
+    window = make_window(monkeypatch)
+    window.user, window.part, window.game = 10, 20, 7
+    window.s.game_status = "АКТИВНА"
+    window.stack.setCurrentWidget(window.lobby_page)
+    window.poll(True)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.Cancel)
+
+    window.confirm_leave_game()
+
+    assert window.s.left_game is None
+    assert window.part == 20
+    window.close()
