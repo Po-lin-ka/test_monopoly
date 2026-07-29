@@ -43,6 +43,7 @@ class GameService:
     def decline_improve(self,p,c): self.db.callproc('monopoly.decline_improvement',[p,c])
     def sell(self,p,o,n): self.db.callproc('monopoly.sell_buildings',[p,o,n])
     def mortgage(self,p,ids): self.db.callproc('monopoly.mortgage_properties',[p,self.db.number_list(ids)])
+    def resolve_debt(self,p,mortgages,sales): self.db.callproc('monopoly.resolve_debt',[p,self.db.number_list(mortgages),self.db.number_list(sales)])
     def redeem(self,p,o): self.db.callproc('monopoly.redeem_property',[p,o])
     def bid(self,a,p,m): self.db.callproc('monopoly.make_bid',[a,p,m])
     def end(self,g): self.db.callproc('monopoly.end_turn',[g])

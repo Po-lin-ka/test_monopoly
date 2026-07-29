@@ -7,7 +7,7 @@ import sys
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QDialog, QDialogButtonBox, QFormLayout, QFrame,
+    QApplication, QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow,
     QMessageBox, QPushButton, QSpinBox, QStackedWidget, QTabWidget, QTableWidget,
     QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
@@ -17,7 +17,7 @@ from .config import settings
 from .db import Database, DatabaseError
 from .service import GameService
 
-APP_VERSION = "2026.07.29-6"
+APP_VERSION = "2026.07.29-7"
 
 RULES_TEXT = """
 Цель игры
@@ -40,7 +40,8 @@ RULES_TEXT = """
 побеждает максимальная ставка; при общем отказе клетка остаётся банку.
 
 Собственность и долг
-Улучшения повышают аренду. Залог разрешён только при отрицательном балансе.
+Аренда улицы без построек равна её цене покупки. Каждый уровень построек добавляет
+ещё 25% первоначальной цены к аренде. Залог разрешён только при отрицательном балансе.
 Залог приносит половину цены, выкуп стоит 110% первоначальной цены.
 
 Тайм-аут и завершение
@@ -51,6 +52,7 @@ RULES_TEXT = """
 
 STYLE = """
 QMainWindow, QWidget { background: #f4f7fb; color: #172033; font: 14px "DejaVu Sans"; }
+QLabel { background: transparent; }
 QFrame#card { background: white; border: 1px solid #dce4f0; border-radius: 16px; }
 QLabel#title { color: #172554; font-size: 28px; font-weight: 700; }
 QLabel#subtitle { color: #64748b; font-size: 14px; }
@@ -59,7 +61,6 @@ QLabel#countdown { color: #c2410c; background: #ffedd5; border-radius: 10px; pad
 QLabel#yourTurn { color: white; background: #16a34a; border-radius: 12px; padding: 12px; font-size: 20px; font-weight: 800; }
 QLabel#waitingTurn { color: #1e3a8a; background: #dbeafe; border-radius: 12px; padding: 12px; font-size: 18px; font-weight: 700; }
 QLabel#balance { color: #166534; background: #dcfce7; border-radius: 10px; padding: 10px; font-size: 17px; font-weight: 700; }
-QLabel#event { color: #78350f; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 10px; padding: 10px; font-weight: 700; }
 QPushButton { background: #e8eef8; border: 0; border-radius: 9px; padding: 10px 16px; color: #24324a; font-weight: 600; }
 QPushButton:hover { background: #dbe7f7; }
 QPushButton:disabled { color: #94a3b8; background: #edf1f6; }
@@ -142,6 +143,12 @@ class BoardWidget(QWidget):
         self.last_dice = None
         self.chance_text = None
         self.current_player_name = None
+        self.center_event = None
+        self.display_positions = {}
+        self.animation_targets = {}
+        self.animation_timer = QTimer(self)
+        self.animation_timer.setInterval(150)
+        self.animation_timer.timeout.connect(self.advance_animation)
         self.cell_rects = []
         self.setMinimumSize(1400, 900)
         self.setToolTip("Игровое поле: 12 клеток по кругу")
@@ -158,6 +165,41 @@ class BoardWidget(QWidget):
             None,
         )
         self.current_player_name = current.get("логин") if current else None
+        active_ids = set()
+        for player in players:
+            participant_id = int(player["id_участника"])
+            active_ids.add(participant_id)
+            target = int(player["позиция"])
+            if participant_id not in self.display_positions:
+                self.display_positions[participant_id] = target
+            elif self.display_positions[participant_id] != target:
+                self.animation_targets[participant_id] = target
+        self.display_positions = {
+            participant_id: position for participant_id, position in self.display_positions.items()
+            if participant_id in active_ids
+        }
+        if self.animation_targets and not self.animation_timer.isActive():
+            self.animation_timer.start()
+        self.update()
+
+    def set_center_event(self, text):
+        self.center_event = text
+        self.update()
+
+    def advance_animation(self):
+        finished = []
+        for participant_id, target in self.animation_targets.items():
+            current = self.display_positions.get(participant_id, target)
+            if current == target:
+                finished.append(participant_id)
+                continue
+            self.display_positions[participant_id] = current % 12 + 1
+            if self.display_positions[participant_id] == target:
+                finished.append(participant_id)
+        for participant_id in finished:
+            self.animation_targets.pop(participant_id, None)
+        if not self.animation_targets:
+            self.animation_timer.stop()
         self.update()
 
     def cell_color(self, cell):
@@ -193,7 +235,11 @@ class BoardWidget(QWidget):
         painter.setPen(QColor("#1e3a8a"))
         painter.setFont(QFont("DejaVu Sans", 13, QFont.Bold))
         turn_text = f"ХОДИТ: {self.current_player_name}" if self.current_player_name else "ОЖИДАНИЕ ХОДА"
-        painter.drawText(center_rect.adjusted(10, 9, -10, -170), Qt.AlignCenter, turn_text)
+        painter.drawText(
+            QRectF(center_rect.left(), center_rect.top() - 42, center_rect.width(), 32),
+            Qt.AlignCenter,
+            turn_text,
+        )
         if self.chance_text:
             painter.setFont(QFont("DejaVu Sans", 17, QFont.Bold))
             painter.drawText(center_rect.adjusted(10, 38, -10, -130), Qt.AlignCenter, "КАРТА «ШАНС»")
@@ -203,6 +249,14 @@ class BoardWidget(QWidget):
                 center_rect.adjusted(18, 76, -18, -14),
                 Qt.AlignCenter | Qt.TextWordWrap,
                 str(self.chance_text),
+            )
+        elif self.center_event:
+            painter.setPen(QColor("#0f172a"))
+            painter.setFont(QFont("DejaVu Sans", 15, QFont.Bold))
+            painter.drawText(
+                center_rect.adjusted(22, 22, -22, -22),
+                Qt.AlignCenter | Qt.TextWordWrap,
+                str(self.center_event),
             )
         else:
             painter.setFont(QFont("DejaVu Sans", 16, QFont.Bold))
@@ -266,7 +320,11 @@ class BoardWidget(QWidget):
         for player_index, player in enumerate(self.players):
             if player.get("код_статуса_участника") not in ("АКТИВЕН", "В_ЛОББИ"):
                 continue
-            by_position.setdefault(int(player["позиция"]), []).append((player_index, player))
+            participant_id = int(player["id_участника"])
+            by_position.setdefault(
+                self.display_positions.get(participant_id, int(player["позиция"])),
+                [],
+            ).append((player_index, player))
         for position, tokens in by_position.items():
             rect = next((item_rect for item_position, item_rect in self.cell_rects if item_position == position), None)
             if rect is None:
@@ -410,6 +468,87 @@ class StatsDialog(QDialog):
         layout.addWidget(button("Закрыть", self.accept, "primary"), alignment=Qt.AlignRight)
 
 
+class MortgageDialog(QDialog):
+    def __init__(self, properties, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Залог собственности для погашения долга")
+        self.setMinimumWidth(680)
+        self.checkboxes = []
+        layout = QVBoxLayout(self)
+        title = QLabel("Выберите объекты для залога")
+        title.setObjectName("roomTitle")
+        hint = QLabel(
+            "Заложить можно только объект без построек, который ещё не заложен. "
+            "Отметьте несколько объектов — итоговая сумма рассчитана автоматически."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(title)
+        layout.addWidget(hint)
+        for item in properties:
+            buildings = int(item["колво_домов"])
+            if buildings > 0:
+                amount = int(item.get("стоимость_продажи_уровня") or 0)
+                action = "sell"
+                description = f"продать 1 уровень из {buildings}"
+            else:
+                amount = int(item["залоговая_стоимость"])
+                action = "mortgage"
+                description = "заложить объект"
+            checkbox = QCheckBox(
+                f'{item["название"]}  •  {description}  •  получите {amount} ₽'
+            )
+            allowed = buildings > 0 or int(item["можно_заложить"]) == 1
+            checkbox.setEnabled(allowed)
+            checkbox.setProperty("ownership_id", int(item["id_владения"]))
+            checkbox.setProperty("amount", amount)
+            checkbox.setProperty("action", action)
+            if not allowed:
+                reason = "объект уже заложен"
+                checkbox.setText(f"{checkbox.text()}  —  недоступно: {reason}")
+            checkbox.toggled.connect(self.update_total)
+            self.checkboxes.append(checkbox)
+            layout.addWidget(checkbox)
+        self.total_label = QLabel("Игрок получит: 0 ₽")
+        self.total_label.setStyleSheet("font-size:20px; font-weight:800; color:#166534;")
+        controls = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        controls.button(QDialogButtonBox.Ok).setText("Заложить выбранное")
+        controls.button(QDialogButtonBox.Ok).setEnabled(False)
+        controls.accepted.connect(self.accept)
+        controls.rejected.connect(self.reject)
+        self.controls = controls
+        layout.addSpacing(12)
+        layout.addWidget(self.total_label)
+        layout.addWidget(controls)
+
+    def update_total(self):
+        total = sum(
+            int(checkbox.property("amount"))
+            for checkbox in self.checkboxes if checkbox.isChecked()
+        )
+        self.total_label.setText(f"Игрок получит: {total} ₽")
+        self.controls.button(QDialogButtonBox.Ok).setEnabled(total > 0)
+
+    def selected_ids(self):
+        return [
+            int(checkbox.property("ownership_id"))
+            for checkbox in self.checkboxes if checkbox.isChecked()
+        ]
+
+    def selected_sales(self):
+        return [
+            int(checkbox.property("ownership_id"))
+            for checkbox in self.checkboxes
+            if checkbox.isChecked() and checkbox.property("action") == "sell"
+        ]
+
+    def selected_mortgages(self):
+        return [
+            int(checkbox.property("ownership_id"))
+            for checkbox in self.checkboxes
+            if checkbox.isChecked() and checkbox.property("action") == "mortgage"
+        ]
+
+
 class Window(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -531,11 +670,11 @@ class Window(QMainWindow):
         controls = QHBoxLayout()
         self.ready_button = button("Я готов", self.toggle_ready, "success")
         self.ready_button.setEnabled(False)
-        controls.addWidget(self.ready_button)
+        controls.addWidget(button("Покинуть комнату", self.leave))
         controls.addStretch()
         self.delete_button = button("Удалить комнату", self.delete_room, "danger")
         controls.addWidget(self.delete_button)
-        controls.addWidget(button("Выйти из комнаты", self.leave))
+        controls.addWidget(self.ready_button)
         controls.addWidget(button("Выйти из аккаунта", self.logout))
         hint = QLabel("Кнопка готовности появляется при двух игроках. Когда готовы все, начинается отсчёт 10 секунд — готовность можно отменить.")
         hint.setWordWrap(True)
@@ -570,13 +709,9 @@ class Window(QMainWindow):
         status_row.addWidget(self.turn_label, 2)
         status_row.addWidget(self.balance_label, 1)
         status_row.addWidget(self.turn_timer_label, 1)
-        self.event_banner = QLabel("Игра началась")
-        self.event_banner.setObjectName("event")
-        self.event_banner.setWordWrap(True)
         self.board = BoardWidget()
         left.addWidget(self.info)
         left.addLayout(status_row)
-        left.addWidget(self.event_banner)
         left.addWidget(self.board, 1)
         leave_row = QHBoxLayout()
         self.leave_game_button = button("Покинуть игру", self.confirm_leave_game, "danger")
@@ -933,7 +1068,10 @@ class Window(QMainWindow):
             old_position = self.previous_positions.get(participant_id)
             new_position = int(row["позиция"])
             if old_position is not None and old_position != new_position:
-                self.event_banner.setText(f'🚶 {row["логин"]} переместился: клетка {old_position} → {new_position} ({row["клетка"]})')
+                self.board.set_center_event(
+                    f'🚶 {row["логин"]} перемещается\n'
+                    f'{old_position} → {new_position}\n{row["клетка"]}'
+                )
         self.previous_positions = current_positions
 
     @staticmethod
@@ -942,7 +1080,9 @@ class Window(QMainWindow):
         cell = f' · {action["клетка"]}' if action.get("клетка") else ""
         code = action.get("код_действия")
         descriptions = {
-            "ОПЛАТА_АРЕНДЫ": "уплатил аренду",
+            "ОПЛАТА_АРЕНДЫ": (
+                f'заплатил {action.get("получатель") or "владельцу"} аренду'
+            ),
             "ПОКУПКА_СОБСТВЕННОСТИ": "приобрёл собственность",
             "ТАЙМ_АУТ": (
                 "пропустил ход и получил штраф"
@@ -985,7 +1125,7 @@ class Window(QMainWindow):
                 if action["код_действия"] == "ОТКАЗ_ОТ_ПОКУПКИ":
                     message += " · Открывается аукцион"
                 messages.append(message)
-            self.event_banner.setText("\n".join(messages))
+            self.board.set_center_event("\n".join(messages))
         self.last_action_id = max(self.last_action_id, *(int(action["id_действия"]) for action in actions))
 
     def handle_auction_invitation(self, players):
@@ -1148,14 +1288,14 @@ class Window(QMainWindow):
     def roll(self):
         try:
             dice = self.s.roll(self.part)
-            self.event_banner.setText(f"🎲 Вы бросили кубик: выпало {dice}. Фишка перемещается…")
+            self.board.set_center_event(f"🎲 Выпало {dice}\nФишка перемещается по полю…")
             self.poll(True)
         except DatabaseError as exc:
             self.alert(str(exc), True)
 
     def buy(self): self.act(lambda: self.s.buy(self.part, self.current_cell()))
     def decline_buy(self):
-        self.event_banner.setText("Вы отказались от покупки. Открывается аукцион для остальных игроков…")
+        self.board.set_center_event("Отказ от покупки\nОткрывается аукцион")
         self.act(lambda: self.s.decline_buy(self.part, self.current_cell()))
     def improve(self): self.act(lambda: self.s.improve(self.part, self.current_cell()))
     def decline_improve(self): self.act(lambda: self.s.decline_improve(self.part, self.current_cell()))
@@ -1166,42 +1306,45 @@ class Window(QMainWindow):
             properties = self.s.props(self.part)
             state = self.state_row.get("код_состояния_хода")
             if state == "ПОКРЫТИЕ_ДОЛГА":
-                properties = [
-                    row for row in properties
-                    if int(row["колво_домов"]) > 0 or int(row["можно_заложить"]) == 1
-                ]
+                if not properties:
+                    self.alert("У вас нет собственности для погашения долга.")
+                    return
+                dialog = MortgageDialog(properties, self)
+                if dialog.exec() == QDialog.Accepted:
+                    def resolve_debt():
+                        self.s.resolve_debt(
+                            self.part,
+                            dialog.selected_mortgages(),
+                            dialog.selected_sales(),
+                        )
+                    self.act(resolve_debt)
+                return
             else:
                 properties = [row for row in properties if int(row["заложена"]) == 1]
             if not properties:
-                self.alert("Сейчас нет собственности, с которой можно выполнить действие.")
+                self.alert(
+                    "Сейчас нет доступных действий с собственностью.\n\n"
+                    "Залог доступен только при отрицательном балансе. "
+                    "Выкуп заложенного объекта доступен перед броском кубика."
+                )
                 return
             labels = [
-                f'{row["id_владения"]}: {row["название"]} · дома: {row["колво_домов"]} · '
-                f'залог: {row["залоговая_стоимость"]} ₽ · выкуп: {row["стоимость_выкупа"]} ₽'
+                f'{row["id_владения"]}: {row["название"]} — заложено; '
+                f'выкупить за {row["стоимость_выкупа"]} ₽'
                 for row in properties
             ]
-            item, accepted = QInputDialog.getItem(self, "Собственность", "Объект", labels, 0, False)
+            item, accepted = QInputDialog.getItem(
+                self,
+                "Управление собственностью",
+                "Выберите заложенный объект для выкупа:",
+                labels,
+                0,
+                False,
+            )
             if not accepted:
                 return
             ownership_id = int(item.split(":")[0])
-            selected = next(row for row in properties if int(row["id_владения"]) == ownership_id)
-            if state == "ПОКРЫТИЕ_ДОЛГА":
-                actions = []
-                if int(selected["колво_домов"]) > 0:
-                    actions.append("Продать 1 уровень постройки")
-                if int(selected["можно_заложить"]) == 1:
-                    actions.append(f'Заложить за {selected["залоговая_стоимость"]} ₽')
-            else:
-                actions = [f'Выкупить за {selected["стоимость_выкупа"]} ₽']
-            action, accepted = QInputDialog.getItem(self, "Действие", "Выберите", actions, 0, False)
-            if not accepted:
-                return
-            if action.startswith("Заложить"):
-                self.act(lambda: self.s.mortgage(self.part, [ownership_id]))
-            elif action.startswith("Выкупить"):
-                self.act(lambda: self.s.redeem(self.part, ownership_id))
-            else:
-                self.act(lambda: self.s.sell(self.part, ownership_id, 1))
+            self.act(lambda: self.s.redeem(self.part, ownership_id))
         except DatabaseError as exc:
             self.alert(str(exc), True)
 

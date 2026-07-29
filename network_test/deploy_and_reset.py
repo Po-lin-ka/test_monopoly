@@ -26,6 +26,14 @@ if __name__ == "__main__":
             cursor.execute(oracle_source("database/07_package_spec.sql"))
             cursor.execute(oracle_source("database/08_package_body.sql"))
             cursor.execute("""
+                UPDATE "КЛЕТКИ"
+                   SET "БАЗОВАЯ_РЕНТА"="ЦЕНА_ПОКУПКИ",
+                       "РЕНТА_1_ДОМ"=CEIL("ЦЕНА_ПОКУПКИ"*1.25),
+                       "РЕНТА_2_ДОМА"=CEIL("ЦЕНА_ПОКУПКИ"*1.50),
+                       "РЕНТА_ОТЕЛЬ"=CEIL("ЦЕНА_ПОКУПКИ"*1.75)
+                 WHERE "ТИП"='Улица'
+            """)
+            cursor.execute("""
                 BEGIN
                     EXECUTE IMMEDIATE 'ALTER TABLE "УЧАСТНИКИ" DROP CONSTRAINT "UQ_УЧ_ИГРА_ОЧ"';
                 EXCEPTION

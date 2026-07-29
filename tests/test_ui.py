@@ -96,6 +96,9 @@ class FakeService:
     def bid(self, auction, participant, amount):
         self.bid_call = (auction, participant, amount)
 
+    def resolve_debt(self, participant, mortgages, sales):
+        self.debt_call = (participant, mortgages, sales)
+
 
 def make_window(monkeypatch):
     QApplication.instance() or QApplication([])
@@ -280,6 +283,30 @@ def test_board_renders_twelve_cells_and_player_tokens():
     widget.close()
 
 
+def test_board_animates_player_cell_by_cell():
+    QApplication.instance() or QApplication([])
+    widget = main.BoardWidget()
+    cells = [{"позиция": position, "название": str(position), "тип": "Старт"} for position in range(1, 13)]
+    player = {
+        "id_участника": 20,
+        "логин": "host",
+        "позиция": 1,
+        "код_статуса_участника": "АКТИВЕН",
+    }
+    widget.set_state(cells, [player], 20)
+    moved = dict(player, позиция=4)
+    widget.set_state(cells, [moved], 20)
+
+    assert widget.display_positions[20] == 1
+    widget.advance_animation()
+    assert widget.display_positions[20] == 2
+    widget.advance_animation()
+    assert widget.display_positions[20] == 3
+    widget.advance_animation()
+    assert widget.display_positions[20] == 4
+    widget.close()
+
+
 def test_dice_action_is_not_formatted_as_money():
     text = main.Window.action_text({
         "дата_время": datetime(2026, 7, 29, 12, 0, 0),
@@ -302,6 +329,7 @@ def test_rent_and_timeout_actions_are_clear():
         "код_действия": "ОПЛАТА_АРЕНДЫ",
         "клетка": "Улица 1",
         "сумма": 25,
+        "получатель": "owner",
     })
     timeout = main.Window.action_text({
         "дата_время": datetime(2026, 7, 29, 12, 1, 0),
@@ -312,7 +340,7 @@ def test_rent_and_timeout_actions_are_clear():
         "сумма": 50,
     })
 
-    assert "уплатил аренду" in rent and "25 ₽" in rent
+    assert "player: заплатил owner аренду" in rent and "25 ₽" in rent
     assert "пропустил ход" in timeout and "штраф" in timeout
 
 
@@ -325,6 +353,40 @@ def test_rules_are_available_from_menu_and_game(monkeypatch):
     assert "Правила игры" in game_buttons
     assert "2 минуты" in main.RULES_TEXT
     window.close()
+
+
+def test_mortgage_dialog_uses_checkboxes_and_calculates_total():
+    QApplication.instance() or QApplication([])
+    dialog = main.MortgageDialog([
+        {
+            "id_владения": 1,
+            "название": "Улица 1",
+            "цена_покупки": 100,
+            "залоговая_стоимость": 50,
+            "стоимость_продажи_уровня": 25,
+            "колво_домов": 0,
+            "заложена": 0,
+            "можно_заложить": 1,
+        },
+        {
+            "id_владения": 2,
+            "название": "Улица 2",
+            "цена_покупки": 110,
+            "залоговая_стоимость": 55,
+            "стоимость_продажи_уровня": 25,
+            "колво_домов": 1,
+            "заложена": 0,
+            "можно_заложить": 0,
+        },
+    ])
+
+    dialog.checkboxes[0].setChecked(True)
+    dialog.checkboxes[1].setChecked(True)
+
+    assert dialog.total_label.text() == "Игрок получит: 75 ₽"
+    assert dialog.selected_mortgages() == [1]
+    assert dialog.selected_sales() == [2]
+    dialog.close()
 
 
 def test_action_log_can_be_collapsed(monkeypatch):
