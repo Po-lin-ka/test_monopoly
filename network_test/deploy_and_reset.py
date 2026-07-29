@@ -33,6 +33,7 @@ if __name__ == "__main__":
                        "РЕНТА_ОТЕЛЬ"=CEIL("ЦЕНА_ПОКУПКИ"*1.75)
                  WHERE "ТИП"='Улица'
             """)
+            cursor.execute('UPDATE "КЛЕТКИ" SET "БОНУС_СТАРТА"=50 WHERE "ТИП"=\'Старт\'')
             cursor.execute("""
                 BEGIN
                     EXECUTE IMMEDIATE 'ALTER TABLE "УЧАСТНИКИ" DROP CONSTRAINT "UQ_УЧ_ИГРА_ОЧ"';

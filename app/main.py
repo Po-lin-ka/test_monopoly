@@ -17,11 +17,12 @@ from .config import settings
 from .db import Database, DatabaseError
 from .service import GameService
 
-APP_VERSION = "2026.07.29-8"
+APP_VERSION = "2026.07.29-9"
 
 RULES_TEXT = """
 Цель игры
-Остаться единственным небанкротом. Каждый игрок начинает с 1500 ₽.
+Остаться единственным небанкротом. Перед началом общий банк 1200 ₽ делится поровну
+между всеми участниками: 600 ₽ для двух, 400 ₽ для трёх или 300 ₽ для четырёх.
 
 Комната и старт
 При двух и более участниках нажмите «Я готов» в своей карточке. Нажатие
@@ -34,7 +35,7 @@ RULES_TEXT = """
 действия завершите ход.
 
 Клетки
-• Старт — при полном круге начисляется 200 ₽.
+• Старт — при полном круге начисляется 50 ₽.
 • Свободная собственность — её можно купить или отказаться и открыть аукцион.
 • Чужая собственность — аренда автоматически переходит владельцу; платёж показан
   в центре и журнале.
@@ -258,27 +259,25 @@ class BoardWidget(QWidget):
             Qt.AlignCenter,
             turn_text,
         )
-        if self.chance_text:
-            painter.setFont(QFont("DejaVu Sans", 17, QFont.Bold))
-            painter.drawText(center_rect.adjusted(10, 38, -10, -130), Qt.AlignCenter, "КАРТА «ШАНС»")
-            painter.setPen(QColor("#92400e"))
-            painter.setFont(QFont("DejaVu Sans", 13, QFont.Bold))
-            painter.drawText(
-                center_rect.adjusted(18, 76, -18, -14),
-                Qt.AlignCenter | Qt.TextWordWrap,
-                str(self.chance_text),
-            )
-        elif self.center_event:
-            painter.setPen(QColor("#0f172a"))
-            painter.setFont(QFont("DejaVu Sans", 15, QFont.Bold))
-            painter.drawText(
-                center_rect.adjusted(22, 22, -22, -22),
-                Qt.AlignCenter | Qt.TextWordWrap,
-                str(self.center_event),
-            )
-        else:
-            painter.setFont(QFont("DejaVu Sans", 82, QFont.Bold))
-            painter.drawText(center_rect.adjusted(8, 8, -8, -8), Qt.AlignCenter, str(self.last_dice or "—"))
+        painter.setFont(QFont("DejaVu Sans", 52, QFont.Bold))
+        painter.drawText(center_rect.adjusted(8, 4, -8, -105), Qt.AlignCenter, str(self.last_dice or "—"))
+        painter.setPen(QPen(QColor("#dbeafe"), 2))
+        painter.drawLine(
+            QPointF(center_rect.left() + 24, center_rect.center().y()),
+            QPointF(center_rect.right() - 24, center_rect.center().y()),
+        )
+        event_text = (
+            f'Карта «Шанс»\n{self.chance_text}'
+            if self.chance_text
+            else self.center_event or "Ожидание первого действия"
+        )
+        painter.setPen(QColor("#0f172a"))
+        painter.setFont(QFont("DejaVu Sans", 12, QFont.Bold))
+        painter.drawText(
+            center_rect.adjusted(20, 112, -20, -14),
+            Qt.AlignCenter | Qt.TextWordWrap,
+            str(event_text),
+        )
 
         self.cell_rects = []
         for index, cell in enumerate(self.cells):
@@ -306,7 +305,7 @@ class BoardWidget(QWidget):
             painter.drawText(rect.adjusted(7, 6, -7, -cell_height + 28), Qt.AlignCenter | Qt.TextWordWrap, name)
             details = []
             if cell.get("тип") == "Старт":
-                details.append(f'Бонус за круг: {cell.get("бонус_старта") or 200} ₽')
+                details.append(f'Бонус за круг: {cell.get("бонус_старта") or 50} ₽')
             elif cell.get("тип") == "Шанс":
                 details.extend(["Премия", "Штраф", "Перемещение"])
             if cell.get("цена_покупки") is not None:
@@ -1144,6 +1143,8 @@ class Window(QMainWindow):
                 self.displayed_action_ids.add(int(action["id_действия"]))
             if was_at_bottom:
                 scrollbar.setValue(scrollbar.maximum())
+            latest_text = self.action_text(new_actions[-1]).split("] ", 1)[-1]
+            self.board.set_center_event(latest_text)
         rent_actions = [action for action in new_actions if action.get("код_действия") == "ОПЛАТА_АРЕНДЫ"]
         if rent_actions:
             action = rent_actions[-1]

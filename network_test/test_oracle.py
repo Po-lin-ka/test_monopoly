@@ -57,6 +57,11 @@ if __name__ == "__main__":
                 game_id=game_id,
             )
             assert cursor.fetchone()[0] == "АКТИВНА"
+            cursor.execute(
+                'SELECT DISTINCT "БАЛАНС" FROM "УЧАСТНИКИ" WHERE "ID_ИГРЫ"=:game_id',
+                game_id=game_id,
+            )
+            assert cursor.fetchall() == [(400,)]
 
             cursor.callproc("monopoly.leave_active_game", [participants[user_ids[0]]])
             cursor.execute(

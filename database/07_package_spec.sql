@@ -1,5 +1,5 @@
 CREATE OR REPLACE PACKAGE monopoly AS
- c_start_balance CONSTANT NUMBER:=1500; c_timeout_penalty CONSTANT NUMBER:=50; c_turn_minutes CONSTANT NUMBER:=2; c_auction_seconds CONSTANT NUMBER:=30; c_ready_seconds CONSTANT NUMBER:=10; c_mortgage_interest CONSTANT NUMBER:=0.10;
+ c_start_balance CONSTANT NUMBER:=1200; c_timeout_penalty CONSTANT NUMBER:=50; c_turn_minutes CONSTANT NUMBER:=2; c_auction_seconds CONSTANT NUMBER:=30; c_ready_seconds CONSTANT NUMBER:=10; c_mortgage_interest CONSTANT NUMBER:=0.10;
  c_bankruptcy_voluntary CONSTANT VARCHAR2(100) := 'ДОБРОВОЛЬНО';
  c_bankruptcy_debt_timeout CONSTANT VARCHAR2(100) := 'ИСТЕКЛО_ВРЕМЯ_ПОКРЫТИЯ_ДОЛГА';
  c_bankruptcy_second_timeout CONSTANT VARCHAR2(100) := 'ПОВТОРНЫЙ_ТАЙМ_АУТ';

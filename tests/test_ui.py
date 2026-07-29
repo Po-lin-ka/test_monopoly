@@ -286,7 +286,7 @@ def test_board_renders_twelve_cells_and_player_tokens():
             "владелец": "host" if position == 2 else None,
             "id_владельца": 20 if position == 2 else None,
             "колво_домов": 0,
-            "бонус_старта": 200 if position == 1 else None,
+            "бонус_старта": 50 if position == 1 else None,
         })
     players = [{
         "id_участника": 20,
@@ -369,6 +369,24 @@ def test_rent_and_timeout_actions_are_clear():
     assert "пропустил ход" in timeout and "штраф" in timeout
 
 
+def test_latest_action_is_shown_in_board_center(monkeypatch):
+    window = make_window(monkeypatch)
+    action = {
+        "id_действия": 99,
+        "дата_время": datetime(2026, 7, 29, 12, 0, 0),
+        "логин": "player",
+        "действие": "Покупка собственности",
+        "код_действия": "ПОКУПКА_СОБСТВЕННОСТИ",
+        "клетка": "Улица 1",
+        "сумма": 100,
+    }
+
+    window.update_action_log([action])
+
+    assert window.board.center_event == "player: приобрёл собственность · Улица 1 · 100 ₽"
+    window.close()
+
+
 def test_rules_are_available_from_menu_and_game(monkeypatch):
     window = make_window(monkeypatch)
     room_buttons = [item.text() for item in window.rooms_page.findChildren(main.QPushButton)]
@@ -377,6 +395,8 @@ def test_rules_are_available_from_menu_and_game(monkeypatch):
     assert "Правила" in room_buttons
     assert "Правила игры" in game_buttons
     assert "2 минуты" in main.RULES_TEXT
+    assert "1200 ₽ делится поровну" in main.RULES_TEXT
+    assert "50 ₽" in main.RULES_TEXT
     window.close()
 
 

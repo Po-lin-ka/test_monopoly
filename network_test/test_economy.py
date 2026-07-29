@@ -24,6 +24,10 @@ if __name__ == "__main__":
             )
         db.connection.commit()
         service.timer(game)
+        started_players = service.players(participants[0])
+        assert {int(row["баланс"]) for row in started_players} == {600}
+        start_cell = next(cell for cell in service.board(participants[0]) if cell["тип"] == "Старт")
+        assert int(start_cell["бонус_старта"]) == 50
         current = int(service.state(participants[0])[0]["id_текущего_участника"])
         payer = next(participant for participant in participants if participant != current)
         current_name = next(
