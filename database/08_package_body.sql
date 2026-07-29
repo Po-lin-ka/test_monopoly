@@ -15,7 +15,7 @@ CREATE OR REPLACE PACKAGE BODY monopoly AS
  END IF;
  END IF;
   INSERT INTO "ЖУРНАЛ_ДЕЙСТВИЙ"("ID_ИГРЫ","ID_УЧАСТНИКА","ID_КЛЕТКИ","КОД_ДЕЙСТВИЯ","СУММА","ТЕКСТ_СОБЫТИЯ","ДАТА_ВРЕМЯ") VALUES(p_game_id,p_participant_id,p_cell_id,p_action_code,p_amount,p_event_text,SYSDATE);
-  UPDATE "ИГРЫ" SET "STATE_VERSION"="STATE_VERSION"+1 WHERE "ID_ИГРЫ"=p_game_id;
+  UPDATE "ИГРЫ" SET "ВЕРСИЯ_СОСТОЯНИЯ"="ВЕРСИЯ_СОСТОЯНИЯ"+1 WHERE "ID_ИГРЫ"=p_game_id;
  END;
  PROCEDURE return_properties_to_bank(p_participant_id NUMBER) IS BEGIN UPDATE "ВЛАДЕНИЯ" SET "ID_ВЛАДЕЛЬЦА"=NULL,"КОЛВО_ДОМОВ"=0,"ЗАЛОЖЕНА"=0 WHERE "ID_ВЛАДЕЛЬЦА"=p_participant_id;
  END;
@@ -210,12 +210,12 @@ CREATE OR REPLACE PACKAGE BODY monopoly AS
  SELECT "ID_УЧАСТНИКА" INTO first_id FROM "УЧАСТНИКИ" WHERE "ID_ИГРЫ"=p_game_id AND "ОЧЕРЕДЬ_ХОДА"=1;
  UPDATE "ИГРЫ" SET "КОД_СТАТУСА_ИГРЫ"='АКТИВНА',"ДАТА_СТАРТА"=SYSDATE,
   "ID_ТЕКУЩЕГО_УЧАСТНИКА"=first_id,"ВРЕМЯ_НАЧАЛА_ХОДА"=SYSDATE,
-  "КОД_СОСТОЯНИЯ_ХОДА"='ОЖИДАНИЕ_БРОСКА',"STATE_VERSION"="STATE_VERSION"+1
+  "КОД_СОСТОЯНИЯ_ХОДА"='ОЖИДАНИЕ_БРОСКА',"ВЕРСИЯ_СОСТОЯНИЯ"="ВЕРСИЯ_СОСТОЯНИЯ"+1
  WHERE "ID_ИГРЫ"=p_game_id;
  END;
 
  FUNCTION get_game_state(p_participant_id NUMBER) RETURN SYS_REFCURSOR IS rc SYS_REFCURSOR;
- BEGIN OPEN rc FOR SELECT g."ID_ИГРЫ",g."НАЗВАНИЕ",g."КОД_СТАТУСА_ИГРЫ",sg."НАИМЕНОВАНИЕ" "СТАТУС_ИГРЫ",g."КОД_СОСТОЯНИЯ_ХОДА",sh."НАИМЕНОВАНИЕ" "СОСТОЯНИЕ_ХОДА",g."ID_ТЕКУЩЕГО_УЧАСТНИКА",g."ID_ПОБЕДИТЕЛЯ",g."ВРЕМЯ_НАЧАЛА_ХОДА",g."ДАТА_СТАРТА",g."ДАТА_ЗАВЕРШЕНИЯ",g."ID_ХОСТА",g."МАКС_ИГРОКОВ",g."STATE_VERSION",(SELECT MAX(a."ID_АУКЦИОНА") FROM "АУКЦИОНЫ" a WHERE a."ID_ИГРЫ"=g."ID_ИГРЫ" AND a."КОД_СТАТУСА_АУКЦИОНА"='АКТИВЕН') "ID_АУКЦИОНА",(SELECT MAX(ca."НАЗВАНИЕ") KEEP(DENSE_RANK LAST ORDER BY a."ID_АУКЦИОНА") FROM "АУКЦИОНЫ" a JOIN "КЛЕТКИ" ca ON ca."ID_КЛЕТКИ"=a."ID_КЛЕТКИ" WHERE a."ID_ИГРЫ"=g."ID_ИГРЫ" AND a."КОД_СТАТУСА_АУКЦИОНА"='АКТИВЕН') "АУКЦИОН_КЛЕТКА",(SELECT MAX(a."СТАРТ_ЦЕНА") KEEP(DENSE_RANK LAST ORDER BY a."ID_АУКЦИОНА") FROM "АУКЦИОНЫ" a WHERE a."ID_ИГРЫ"=g."ID_ИГРЫ" AND a."КОД_СТАТУСА_АУКЦИОНА"='АКТИВЕН') "СТАРТ_ЦЕНА",(SELECT MAX(s."СУММА") FROM "СТАВКИ" s JOIN "АУКЦИОНЫ" a ON a."ID_АУКЦИОНА"=s."ID_АУКЦИОНА" WHERE a."ID_ИГРЫ"=g."ID_ИГРЫ" AND a."КОД_СТАТУСА_АУКЦИОНА"='АКТИВЕН' AND s."ID_УЧАСТНИКА"=me."ID_УЧАСТНИКА") "МОЯ_СТАВКА",(SELECT MAX(j."ТЕКСТ_СОБЫТИЯ") KEEP(DENSE_RANK LAST ORDER BY j."ID_ДЕЙСТВИЯ") FROM "ЖУРНАЛ_ДЕЙСТВИЙ" j WHERE j."ID_ИГРЫ"=g."ID_ИГРЫ" AND j."КОД_ДЕЙСТВИЯ"='КАРТА_ШАНСА' AND j."ID_ДЕЙСТВИЯ">NVL((SELECT MAX(jd."ID_ДЕЙСТВИЯ") FROM "ЖУРНАЛ_ДЕЙСТВИЙ" jd WHERE jd."ID_ИГРЫ"=g."ID_ИГРЫ" AND jd."КОД_ДЕЙСТВИЯ"='БРОСОК_КУБИКА'),0)) "ПОСЛЕДНЯЯ_КАРТА_ШАНСА",CASE WHEN g."КОД_СТАТУСА_ИГРЫ"='ПРОВЕРКА_ГОТОВНОСТИ' THEN GREATEST(0,CEIL(c_ready_seconds-(SYSDATE-g."ВРЕМЯ_НАЧАЛА_ХОДА")*86400)) END "СЕКУНД_ДО_СТАРТА",CASE WHEN g."КОД_СТАТУСА_ИГРЫ"='АКТИВНА' AND g."ВРЕМЯ_НАЧАЛА_ХОДА" IS NOT NULL THEN GREATEST(0,CEIL(c_turn_minutes*60-(SYSDATE-g."ВРЕМЯ_НАЧАЛА_ХОДА")*86400)) END "СЕКУНД_ХОДА",(SELECT MAX(j."СУММА") KEEP(DENSE_RANK LAST ORDER BY j."ID_ДЕЙСТВИЯ") FROM "ЖУРНАЛ_ДЕЙСТВИЙ" j WHERE j."ID_ИГРЫ"=g."ID_ИГРЫ" AND j."КОД_ДЕЙСТВИЯ"='БРОСОК_КУБИКА') "ПОСЛЕДНИЙ_КУБИК" FROM "УЧАСТНИКИ" me JOIN "ИГРЫ" g ON g."ID_ИГРЫ"=me."ID_ИГРЫ" JOIN "СТАТУСЫ_ИГР" sg ON sg."КОД_СТАТУСА_ИГРЫ"=g."КОД_СТАТУСА_ИГРЫ" LEFT JOIN "СОСТОЯНИЯ_ХОДА" sh ON sh."КОД_СОСТОЯНИЯ_ХОДА"=g."КОД_СОСТОЯНИЯ_ХОДА" WHERE me."ID_УЧАСТНИКА"=p_participant_id;
+ BEGIN OPEN rc FOR SELECT g."ID_ИГРЫ",g."НАЗВАНИЕ",g."КОД_СТАТУСА_ИГРЫ",sg."НАИМЕНОВАНИЕ" "СТАТУС_ИГРЫ",g."КОД_СОСТОЯНИЯ_ХОДА",sh."НАИМЕНОВАНИЕ" "СОСТОЯНИЕ_ХОДА",g."ID_ТЕКУЩЕГО_УЧАСТНИКА",g."ID_ПОБЕДИТЕЛЯ",g."ВРЕМЯ_НАЧАЛА_ХОДА",g."ДАТА_СТАРТА",g."ДАТА_ЗАВЕРШЕНИЯ",g."ID_ХОСТА",g."МАКС_ИГРОКОВ",g."ВЕРСИЯ_СОСТОЯНИЯ",(SELECT MAX(a."ID_АУКЦИОНА") FROM "АУКЦИОНЫ" a WHERE a."ID_ИГРЫ"=g."ID_ИГРЫ" AND a."КОД_СТАТУСА_АУКЦИОНА"='АКТИВЕН') "ID_АУКЦИОНА",(SELECT MAX(ca."НАЗВАНИЕ") KEEP(DENSE_RANK LAST ORDER BY a."ID_АУКЦИОНА") FROM "АУКЦИОНЫ" a JOIN "КЛЕТКИ" ca ON ca."ID_КЛЕТКИ"=a."ID_КЛЕТКИ" WHERE a."ID_ИГРЫ"=g."ID_ИГРЫ" AND a."КОД_СТАТУСА_АУКЦИОНА"='АКТИВЕН') "АУКЦИОН_КЛЕТКА",(SELECT MAX(a."СТАРТ_ЦЕНА") KEEP(DENSE_RANK LAST ORDER BY a."ID_АУКЦИОНА") FROM "АУКЦИОНЫ" a WHERE a."ID_ИГРЫ"=g."ID_ИГРЫ" AND a."КОД_СТАТУСА_АУКЦИОНА"='АКТИВЕН') "СТАРТ_ЦЕНА",(SELECT MAX(s."СУММА") FROM "СТАВКИ" s JOIN "АУКЦИОНЫ" a ON a."ID_АУКЦИОНА"=s."ID_АУКЦИОНА" WHERE a."ID_ИГРЫ"=g."ID_ИГРЫ" AND a."КОД_СТАТУСА_АУКЦИОНА"='АКТИВЕН' AND s."ID_УЧАСТНИКА"=me."ID_УЧАСТНИКА") "МОЯ_СТАВКА",(SELECT MAX(j."ТЕКСТ_СОБЫТИЯ") KEEP(DENSE_RANK LAST ORDER BY j."ID_ДЕЙСТВИЯ") FROM "ЖУРНАЛ_ДЕЙСТВИЙ" j WHERE j."ID_ИГРЫ"=g."ID_ИГРЫ" AND j."КОД_ДЕЙСТВИЯ"='КАРТА_ШАНСА' AND j."ID_ДЕЙСТВИЯ">NVL((SELECT MAX(jd."ID_ДЕЙСТВИЯ") FROM "ЖУРНАЛ_ДЕЙСТВИЙ" jd WHERE jd."ID_ИГРЫ"=g."ID_ИГРЫ" AND jd."КОД_ДЕЙСТВИЯ"='БРОСОК_КУБИКА'),0)) "ПОСЛЕДНЯЯ_КАРТА_ШАНСА",CASE WHEN g."КОД_СТАТУСА_ИГРЫ"='ПРОВЕРКА_ГОТОВНОСТИ' THEN GREATEST(0,CEIL(c_ready_seconds-(SYSDATE-g."ВРЕМЯ_НАЧАЛА_ХОДА")*86400)) END "СЕКУНД_ДО_СТАРТА",CASE WHEN g."КОД_СТАТУСА_ИГРЫ"='АКТИВНА' AND g."ВРЕМЯ_НАЧАЛА_ХОДА" IS NOT NULL THEN GREATEST(0,CEIL(c_turn_minutes*60-(SYSDATE-g."ВРЕМЯ_НАЧАЛА_ХОДА")*86400)) END "СЕКУНД_ХОДА",(SELECT MAX(j."СУММА") KEEP(DENSE_RANK LAST ORDER BY j."ID_ДЕЙСТВИЯ") FROM "ЖУРНАЛ_ДЕЙСТВИЙ" j WHERE j."ID_ИГРЫ"=g."ID_ИГРЫ" AND j."КОД_ДЕЙСТВИЯ"='БРОСОК_КУБИКА') "ПОСЛЕДНИЙ_КУБИК" FROM "УЧАСТНИКИ" me JOIN "ИГРЫ" g ON g."ID_ИГРЫ"=me."ID_ИГРЫ" JOIN "СТАТУСЫ_ИГР" sg ON sg."КОД_СТАТУСА_ИГРЫ"=g."КОД_СТАТУСА_ИГРЫ" LEFT JOIN "СОСТОЯНИЯ_ХОДА" sh ON sh."КОД_СОСТОЯНИЯ_ХОДА"=g."КОД_СОСТОЯНИЯ_ХОДА" WHERE me."ID_УЧАСТНИКА"=p_participant_id;
  RETURN rc;
  END;
  FUNCTION get_game_participants(p_participant_id NUMBER) RETURN SYS_REFCURSOR IS rc SYS_REFCURSOR;
@@ -773,16 +773,16 @@ CREATE OR REPLACE PACKAGE BODY monopoly AS
 
  PROCEDURE get_game_snapshot(
   p_participant_id NUMBER,p_last_action_id NUMBER,p_last_message_id NUMBER,
-  p_known_state_version NUMBER,p_include_static NUMBER,
+  p_known_version NUMBER,p_include_static NUMBER,
   p_state OUT SYS_REFCURSOR,p_players OUT SYS_REFCURSOR,p_cells OUT SYS_REFCURSOR,
   p_ownerships OUT SYS_REFCURSOR,p_actions OUT SYS_REFCURSOR,p_chat OUT SYS_REFCURSOR
  ) IS
   g NUMBER;
-  current_version NUMBER;
+  current_revision NUMBER;
  BEGIN
   g:=participant_game(p_participant_id);
   check_game_timer(g);
-  SELECT "STATE_VERSION" INTO current_version FROM "ИГРЫ" WHERE "ID_ИГРЫ"=g;
+  SELECT "ВЕРСИЯ_СОСТОЯНИЯ" INTO current_revision FROM "ИГРЫ" WHERE "ID_ИГРЫ"=g;
   p_state:=get_game_state(p_participant_id);
   p_players:=get_game_participants(p_participant_id);
 
@@ -812,7 +812,7 @@ CREATE OR REPLACE PACKAGE BODY monopoly AS
      JOIN "КЛЕТКИ" c ON c."ID_КЛЕТКИ"=v."ID_КЛЕТКИ"
      LEFT JOIN "УЧАСТНИКИ" u ON u."ID_УЧАСТНИКА"=v."ID_ВЛАДЕЛЬЦА"
      LEFT JOIN "ПОЛЬЗОВАТЕЛИ" p ON p."ID_ПОЛЬЗОВАТЕЛЯ"=u."ID_ПОЛЬЗОВАТЕЛЯ"
-    WHERE v."ID_ИГРЫ"=g AND current_version<>NVL(p_known_state_version,-1);
+    WHERE v."ID_ИГРЫ"=g AND current_revision<>NVL(p_known_version,-1);
 
   OPEN p_actions FOR
    SELECT j."ID_ДЕЙСТВИЯ",j."ДАТА_ВРЕМЯ",j."КОД_ДЕЙСТВИЯ",

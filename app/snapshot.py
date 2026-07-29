@@ -15,7 +15,7 @@ class SnapshotThread(QThread):
         participant_id: int,
         last_action_id: int,
         last_message_id: int,
-        known_state_version: int,
+        known_version: int,
         include_static: bool,
         parent=None,
     ):
@@ -24,7 +24,7 @@ class SnapshotThread(QThread):
             participant_id,
             last_action_id,
             last_message_id,
-            known_state_version,
+            known_version,
             include_static,
         )
 

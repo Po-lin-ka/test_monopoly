@@ -25,7 +25,7 @@ CREATE OR REPLACE PACKAGE monopoly AS
  FUNCTION get_active_auction(p_participant_id IN NUMBER) RETURN SYS_REFCURSOR;
  PROCEDURE get_game_snapshot(
   p_participant_id IN NUMBER,p_last_action_id IN NUMBER,p_last_message_id IN NUMBER,
-  p_known_state_version IN NUMBER,p_include_static IN NUMBER,
+  p_known_version IN NUMBER,p_include_static IN NUMBER,
   p_state OUT SYS_REFCURSOR,p_players OUT SYS_REFCURSOR,p_cells OUT SYS_REFCURSOR,
   p_ownerships OUT SYS_REFCURSOR,p_actions OUT SYS_REFCURSOR,p_chat OUT SYS_REFCURSOR);
  PROCEDURE roll_and_move(p_participant_id IN NUMBER,p_dice OUT NUMBER);
