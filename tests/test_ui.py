@@ -342,7 +342,8 @@ def test_mortgaged_street_uses_gray_background():
     assert widget.GROUP_COLORS["ГРУППА_1"] == "#72ad82"
     assert widget.GROUP_COLORS["ГРУППА_2"] == "#dda25f"
     assert widget.GROUP_COLORS["ГРУППА_3"] == "#bda38f"
-    assert widget.CELL_STRIPE_COLORS["Старт"] == "#72ad82"
+    assert widget.CELL_STRIPE_COLORS["Старт"] == "#a7c98f"
+    assert widget.CELL_STRIPE_COLORS["Старт"] != widget.GROUP_COLORS["ГРУППА_1"]
     assert widget.CELL_STRIPE_COLORS["Шанс"] == "#e7c85b"
     widget.close()
 
@@ -430,6 +431,8 @@ def test_rules_are_available_from_menu_and_game(monkeypatch):
     assert "1200 ₽ делится поровну" in main.RULES_TEXT
     assert "100 ₽" in main.RULES_TEXT
     assert "25% первоначальной цены" in main.RULES_TEXT
+    assert "Депо и МЦД" in main.RULES_TEXT
+    assert "30 секунд" in main.RULES_TEXT
     window.close()
 
 

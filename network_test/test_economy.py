@@ -40,13 +40,20 @@ if __name__ == "__main__":
             cell["название"] for cell in service.board(participants[0])
             if cell["тип"] == "Коммунальная"
         ]
-        assert utility_names == ["Картёж", "Ремонт"]
+        assert utility_names == ["Депо", "МЦД"]
         with db.cursor() as cursor:
             cursor.execute(
                 'SELECT MAX("СУММА_ИЗМЕНЕНИЯ") FROM "КАРТЫ_ШАНСА" '
                 'WHERE "СУММА_ИЗМЕНЕНИЯ" IS NOT NULL'
             )
             assert int(cursor.fetchone()[0]) <= int(start_cell["бонус_старта"])
+            cursor.execute(
+                'SELECT COUNT(*) FROM "КАРТЫ_ШАНСА" k JOIN "КЛЕТКИ" c '
+                'ON c."ID_КЛЕТКИ"=k."ID_ЦЕЛЕВОЙ_КЛЕТКИ" '
+                'WHERE c."НАЗВАНИЕ"=\'Депо\' '
+                'AND k."ТЕКСТ_СОБЫТИЯ"=\'Переместитесь в Депо.\''
+            )
+            assert int(cursor.fetchone()[0]) == 1
         current = int(service.state(participants[0])[0]["id_текущего_участника"])
         payer = next(participant for participant in participants if participant != current)
         current_name = next(
