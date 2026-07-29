@@ -36,6 +36,14 @@ if __name__ == "__main__":
             """)
             cursor.execute('UPDATE "КЛЕТКИ" SET "БОНУС_СТАРТА"=100 WHERE "ТИП"=\'Старт\'')
             cursor.execute("""
+                UPDATE "КЛЕТКИ"
+                   SET "НАЗВАНИЕ"=CASE "ПОЗИЦИЯ"
+                       WHEN 4 THEN 'Картёж'
+                       WHEN 9 THEN 'Ремонт'
+                   END
+                 WHERE "ПОЗИЦИЯ" IN (4,9)
+            """)
+            cursor.execute("""
                 MERGE INTO "КЛЕТКИ" c
                 USING (
                     SELECT 2 p,'Домодедовская' n,'ГРУППА_1' g FROM dual UNION ALL
@@ -48,6 +56,23 @@ if __name__ == "__main__":
                     SELECT 12,'Октябрьская','ГРУППА_3' FROM dual
                 ) x ON (c."ПОЗИЦИЯ"=x.p)
                 WHEN MATCHED THEN UPDATE SET c."НАЗВАНИЕ"=x.n,c."ЦВЕТОВАЯ_ГРУППА"=x.g
+            """)
+            cursor.execute("""
+                UPDATE "КАРТЫ_ШАНСА"
+                   SET "СУММА_ИЗМЕНЕНИЯ"=LEAST("СУММА_ИЗМЕНЕНИЯ",100),
+                       "ТЕКСТ_СОБЫТИЯ"=CASE
+                           WHEN "ТИП_ЭФФЕКТА"='Премия'
+                               THEN 'Премия: +' || LEAST("СУММА_ИЗМЕНЕНИЯ",100) || ' ₽.'
+                           WHEN "ТИП_ЭФФЕКТА"='Штраф'
+                               THEN 'Штраф: −' || LEAST("СУММА_ИЗМЕНЕНИЯ",100) || ' ₽.'
+                           ELSE REPLACE(
+                               REPLACE(
+                                   REPLACE("ТЕКСТ_СОБЫТИЯ",'Улицу 1','Домодедовскую'),
+                                   'Улицу 7','Добрынинскую'
+                               ),
+                               'Электростанцию','Картёж'
+                           )
+                       END
             """)
             cursor.execute("""
                 BEGIN

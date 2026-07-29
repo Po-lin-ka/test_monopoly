@@ -36,6 +36,17 @@ if __name__ == "__main__":
             "Домодедовская", "Каширская", "Павелецкая", "ВДНХ",
             "Сухаревская", "Третьяковская", "Добрынинская", "Октябрьская",
         ]
+        utility_names = [
+            cell["название"] for cell in service.board(participants[0])
+            if cell["тип"] == "Коммунальная"
+        ]
+        assert utility_names == ["Картёж", "Ремонт"]
+        with db.cursor() as cursor:
+            cursor.execute(
+                'SELECT MAX("СУММА_ИЗМЕНЕНИЯ") FROM "КАРТЫ_ШАНСА" '
+                'WHERE "СУММА_ИЗМЕНЕНИЯ" IS NOT NULL'
+            )
+            assert int(cursor.fetchone()[0]) <= int(start_cell["бонус_старта"])
         current = int(service.state(participants[0])[0]["id_текущего_участника"])
         payer = next(participant for participant in participants if participant != current)
         current_name = next(

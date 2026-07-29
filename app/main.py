@@ -17,7 +17,7 @@ from .config import settings
 from .db import Database, DatabaseError
 from .service import GameService
 
-APP_VERSION = "2026.07.29-10"
+APP_VERSION = "2026.07.29-11"
 
 RULES_TEXT = """
 Цель игры
@@ -41,7 +41,8 @@ RULES_TEXT = """
   в центре и журнале.
 • Своя улица — при повторном попадании можно последовательно купить первый дом,
   второй дом, затем отель. Владеть всей группой для строительства не требуется.
-• Шанс — случайная премия, штраф или перемещение; карта показана в центре.
+• Шанс — случайная премия +50/+100 ₽, штраф −50/−100 ₽ или перемещение;
+  денежный эффект не превышает бонус Старта, карта показана в центре.
 
 Аренда, группы и улучшения
 Базовая аренда улицы равна цене покупки. С первым домом она составляет 125%,
@@ -49,7 +50,7 @@ RULES_TEXT = """
 первого дома, второго дома или отеля — стоит 25% первоначальной цены улицы.
 Если один игрок владеет всеми незаложенными улицами цветовой группы, аренда каждой
 из них удваивается независимо от разных уровней улучшений.
-Зелёная группа: Домодедовская, Каширская, Павелецкая. Красная: ВДНХ,
+Зелёная группа: Домодедовская, Каширская, Павелецкая. Оранжевая: ВДНХ,
 Сухаревская, Третьяковская. Коричневая: Добрынинская, Октябрьская.
 
 Аукцион
@@ -139,20 +140,20 @@ def fill(table, rows):
 
 class BoardWidget(QWidget):
     TOKEN_COLORS = ["#ef4444", "#2563eb", "#16a34a", "#a855f7"]
-    CELL_COLORS = {
-        "Старт": "#86efac",
-        "Шанс": "#fde047",
-        "Коммунальная": "#67e8f9",
+    CELL_STRIPE_COLORS = {
+        "Старт": "#72ad82",
+        "Шанс": "#e7c85b",
+        "Коммунальная": "#8ab9ca",
     }
     GROUP_COLORS = {
-        "Группа 1": "#9bc7a5",
-        "Группа 2": "#d9a0a0",
+        "Группа 1": "#72ad82",
+        "Группа 2": "#dda25f",
         "Группа 3": "#bda38f",
-        "ГРУППА_1": "#9bc7a5",
-        "ГРУППА_2": "#d9a0a0",
+        "ГРУППА_1": "#72ad82",
+        "ГРУППА_2": "#dda25f",
         "ГРУППА_3": "#bda38f",
-        "1": "#9bc7a5",
-        "2": "#d9a0a0",
+        "1": "#72ad82",
+        "2": "#dda25f",
         "3": "#bda38f",
     }
 
@@ -227,9 +228,7 @@ class BoardWidget(QWidget):
         self.update()
 
     def cell_color(self, cell):
-        if cell.get("тип") == "Улица":
-            return "#e5e7eb" if int(cell.get("заложена") or 0) else "#ffffff"
-        return self.CELL_COLORS.get(cell.get("тип"), "#e2e8f0")
+        return "#e5e7eb" if int(cell.get("заложена") or 0) else "#ffffff"
 
     def paintEvent(self, _event):
         painter = QPainter(self)
@@ -307,29 +306,37 @@ class BoardWidget(QWidget):
             if len(name) > 18:
                 name = name[:17] + "…"
             detail_top = 31
-            if cell.get("тип") == "Улица":
+            cell_type = cell.get("тип")
+            if cell_type in ("Улица", "Старт", "Шанс", "Коммунальная"):
                 stripe_height = cell_height / 6
-                stripe = QRectF(rect.left(), rect.top(), rect.width(), stripe_height)
-                stripe_color = (
-                    "#9ca3af" if int(cell.get("заложена") or 0)
-                    else self.GROUP_COLORS.get(str(cell.get("цветовая_группа")), "#cbd5e1")
+                border_inset = 7 if owner_index is not None else 2
+                stripe = QRectF(
+                    rect.left() + border_inset,
+                    rect.top() + border_inset,
+                    rect.width() - border_inset * 2,
+                    stripe_height,
                 )
+                if int(cell.get("заложена") or 0):
+                    stripe_color = "#9ca3af"
+                elif cell_type == "Улица":
+                    stripe_color = self.GROUP_COLORS.get(
+                        str(cell.get("цветовая_группа")), "#cbd5e1"
+                    )
+                else:
+                    stripe_color = self.CELL_STRIPE_COLORS.get(cell_type, "#cbd5e1")
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(QColor(stripe_color))
-                painter.drawRoundedRect(stripe, 10, 10)
-                painter.drawRect(QRectF(stripe.left(), stripe.bottom() - 10, stripe.width(), 10))
+                painter.drawRoundedRect(stripe, 7, 7)
+                painter.drawRect(QRectF(stripe.left(), stripe.bottom() - 7, stripe.width(), 7))
                 painter.setPen(QColor("#172033"))
                 painter.setFont(QFont("DejaVu Sans", 10, QFont.Bold))
                 painter.drawText(stripe.adjusted(5, 1, -5, -1), Qt.AlignCenter, name)
-                detail_top = int(stripe_height) + 4
-            else:
-                painter.setFont(QFont("DejaVu Sans", 12, QFont.Bold))
-                painter.drawText(rect.adjusted(7, 6, -7, -cell_height + 28), Qt.AlignCenter | Qt.TextWordWrap, name)
+                detail_top = int(stripe_height + border_inset) + 4
             details = []
-            if cell.get("тип") == "Старт":
-                details.append(f'Бонус за круг: {cell.get("бонус_старта") or 50} ₽')
-            elif cell.get("тип") == "Шанс":
-                details.extend(["Премия", "Штраф", "Перемещение"])
+            if cell_type == "Старт":
+                details.append(f'+{cell.get("бонус_старта") or 100} ₽ за полный круг')
+            elif cell_type == "Шанс":
+                details.extend(["Премия: +50 или +100 ₽", "Штраф: −50 или −100 ₽", "или перемещение"])
             if cell.get("цена_покупки") is not None:
                 details.append(f'Цена: {cell["цена_покупки"]} ₽')
             if cell.get("владелец"):

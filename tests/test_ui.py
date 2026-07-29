@@ -339,9 +339,11 @@ def test_mortgaged_street_uses_gray_background():
 
     assert widget.cell_color({"тип": "Улица", "заложена": 1}) == "#e5e7eb"
     assert widget.cell_color({"тип": "Улица", "заложена": 0}) == "#ffffff"
-    assert widget.GROUP_COLORS["ГРУППА_1"] == "#9bc7a5"
-    assert widget.GROUP_COLORS["ГРУППА_2"] == "#d9a0a0"
+    assert widget.GROUP_COLORS["ГРУППА_1"] == "#72ad82"
+    assert widget.GROUP_COLORS["ГРУППА_2"] == "#dda25f"
     assert widget.GROUP_COLORS["ГРУППА_3"] == "#bda38f"
+    assert widget.CELL_STRIPE_COLORS["Старт"] == "#72ad82"
+    assert widget.CELL_STRIPE_COLORS["Шанс"] == "#e7c85b"
     widget.close()
 
 
