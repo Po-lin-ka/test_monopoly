@@ -17,32 +17,47 @@ from .config import settings
 from .db import Database, DatabaseError
 from .service import GameService
 
-APP_VERSION = "2026.07.29-7"
+APP_VERSION = "2026.07.29-8"
 
 RULES_TEXT = """
 Цель игры
 Остаться единственным небанкротом. Каждый игрок начинает с 1500 ₽.
 
+Комната и старт
+При двух и более участниках нажмите «Я готов» в своей карточке. Нажатие
+«Отменить готовность» возвращает статус ожидания. Когда готовы все, запускается
+10-секундный отсчёт; за это время готовность ещё можно отменить.
+
 Ход игрока
-На ход даётся 2 минуты. Нажмите «Бросить кубик», после чего фишка автоматически
-переместится. Выпавшее число, текущий игрок и важные события показаны в центре поля
-и в журнале. После доступных действий завершите ход.
+На ход даётся 2 минуты. После броска стрелка проходит выпавшее число клеток.
+Текущий игрок указан над центром поля, число кубика — внутри. После доступного
+действия завершите ход.
 
 Клетки
 • Старт — при полном круге начисляется 200 ₽.
 • Свободная собственность — её можно купить или отказаться и открыть аукцион.
-• Чужая собственность — аренда списывается автоматически и передаётся владельцу.
-• Шанс — случайная премия, штраф или перемещение; результат появится в центре поля.
+• Чужая собственность — аренда автоматически переходит владельцу; платёж показан
+  в центре и журнале.
+• Своя улица — при повторном попадании можно последовательно купить первый дом,
+  второй дом, затем отель. Владеть всей группой для строительства не требуется.
+• Шанс — случайная премия, штраф или перемещение; карта показана в центре.
+
+Аренда, группы и улучшения
+Базовая аренда улицы равна цене покупки. С первым домом она составляет 125%,
+со вторым — 150%, с отелем — 175% цены улицы. Покупка каждого улучшения стоит
+ровно новую аренду этого уровня: например, для улицы 100 ₽ это 125, 150 и 175 ₽.
+Если один игрок владеет всеми незаложенными улицами цветовой группы, аренда каждой
+из них удваивается независимо от разных уровней улучшений.
 
 Аукцион
 Игроки, кроме отказавшегося от покупки, выбирают участие. Ставка должна быть не
 меньше половины цены клетки и не больше баланса. После ответов всех участников
 побеждает максимальная ставка; при общем отказе клетка остаётся банку.
 
-Собственность и долг
-Аренда улицы без построек равна её цене покупки. Каждый уровень построек добавляет
-ещё 25% первоначальной цены к аренде. Залог разрешён только при отрицательном балансе.
-Залог приносит половину цены, выкуп стоит 110% первоначальной цены.
+Долг и залог
+Залог доступен только при отрицательном балансе и приносит половину цены объекта.
+Объект с постройками сначала требует их продажи. В окне долга можно выбрать
+несколько действий и увидеть общую сумму. Выкуп стоит 110% первоначальной цены.
 
 Тайм-аут и завершение
 Первый пропущенный ход автоматически завершается со штрафом 50 ₽. За второй
@@ -147,7 +162,7 @@ class BoardWidget(QWidget):
         self.display_positions = {}
         self.animation_targets = {}
         self.animation_timer = QTimer(self)
-        self.animation_timer.setInterval(150)
+        self.animation_timer.setInterval(550)
         self.animation_timer.timeout.connect(self.advance_animation)
         self.cell_rects = []
         self.setMinimumSize(1400, 900)
@@ -157,7 +172,10 @@ class BoardWidget(QWidget):
         self.cells = sorted(cells, key=lambda row: int(row["позиция"]))
         self.players = players
         self.current_participant = int(current_participant) if current_participant is not None else None
-        self.last_dice = int(last_dice) if last_dice is not None else None
+        new_dice = int(last_dice) if last_dice is not None else None
+        if self.last_dice is not None and new_dice != self.last_dice:
+            self.center_event = None
+        self.last_dice = new_dice
         self.chance_text = chance_text
         current = next(
             (row for row in players if current_participant is not None
@@ -259,13 +277,8 @@ class BoardWidget(QWidget):
                 str(self.center_event),
             )
         else:
-            painter.setFont(QFont("DejaVu Sans", 16, QFont.Bold))
-            painter.drawText(center_rect.adjusted(8, 40, -8, -132), Qt.AlignCenter, "ВЫПАЛО НА КУБИКЕ")
-            painter.setFont(QFont("DejaVu Sans", 58, QFont.Bold))
-            painter.drawText(center_rect.adjusted(8, 68, -8, -36), Qt.AlignCenter, str(self.last_dice or "—"))
-            painter.setPen(QColor("#64748b"))
-            painter.setFont(QFont("DejaVu Sans", 10))
-            painter.drawText(center_rect.adjusted(8, 176, -8, -8), Qt.AlignCenter, "Последний бросок")
+            painter.setFont(QFont("DejaVu Sans", 82, QFont.Bold))
+            painter.drawText(center_rect.adjusted(8, 8, -8, -8), Qt.AlignCenter, str(self.last_dice or "—"))
 
         self.cell_rects = []
         for index, cell in enumerate(self.cells):
@@ -302,6 +315,9 @@ class BoardWidget(QWidget):
                 details.append(f'Владелец: {cell["владелец"]}')
             if cell.get("тип") == "Улица":
                 level = int(cell.get("колво_домов") or 0)
+                multiplier = int(cell.get("множитель_группы") or 1)
+                if multiplier == 2:
+                    details.append("Комплект группы: аренда ×2")
                 rents = [
                     ("Без домов", cell.get("базовая_рента")),
                     ("1 дом", cell.get("рента_1_дом")),
@@ -310,7 +326,8 @@ class BoardWidget(QWidget):
                 ]
                 for rent_level, (label, amount) in enumerate(rents):
                     marker = "▶" if rent_level == level else " "
-                    details.append(f"{marker} {label}: {amount if amount is not None else '—'} ₽")
+                    shown_amount = int(amount) * multiplier if amount is not None else "—"
+                    details.append(f"{marker} {label}: {shown_amount} ₽")
             elif not details:
                 details.append(str(cell["тип"]))
             painter.setFont(QFont("DejaVu Sans", 11))
@@ -568,6 +585,7 @@ class Window(QMainWindow):
         self.prompted_auctions = set()
         self.cached_board = []
         self.cached_players = []
+        self.cached_lobby_players = []
         self.last_board_signature = None
         self.poll_count = 0
         self.disconnected = False
@@ -667,26 +685,25 @@ class Window(QMainWindow):
         self.player_cards_layout.setSpacing(16)
         self.player_cards_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
         self.lobby_player_cards = []
-        controls = QHBoxLayout()
-        self.ready_button = button("Я готов", self.toggle_ready, "success")
-        self.ready_button.setEnabled(False)
-        controls.addWidget(button("Покинуть комнату", self.leave))
-        controls.addStretch()
+        top_controls = QHBoxLayout()
+        top_controls.addWidget(button("Покинуть комнату", self.leave))
+        top_controls.addStretch()
+        bottom_controls = QHBoxLayout()
         self.delete_button = button("Удалить комнату", self.delete_room, "danger")
-        controls.addWidget(self.delete_button)
-        controls.addWidget(self.ready_button)
-        controls.addWidget(button("Выйти из аккаунта", self.logout))
-        hint = QLabel("Кнопка готовности появляется при двух игроках. Когда готовы все, начинается отсчёт 10 секунд — готовность можно отменить.")
+        bottom_controls.addWidget(self.delete_button)
+        bottom_controls.addStretch()
+        hint = QLabel("Когда в комнате минимум два игрока, в вашей карточке появляется кнопка готовности. После готовности всех начинается отсчёт 10 секунд.")
         hint.setWordWrap(True)
         hint.setObjectName("subtitle")
         layout.addWidget(self.lobby_title)
         layout.addWidget(self.lobby_info)
+        layout.addLayout(top_controls)
         layout.addWidget(self.countdown)
         layout.addSpacing(8)
         layout.addWidget(QLabel("Игроки в комнате"))
         layout.addWidget(self.players_panel, 1)
         layout.addWidget(hint)
-        layout.addLayout(controls)
+        layout.addLayout(bottom_controls)
         return page
 
     def game_ui(self):
@@ -930,7 +947,13 @@ class Window(QMainWindow):
         self.poll(True)
 
     def toggle_ready(self):
-        ready = self.ready_button.property("ready") is True
+        ready = bool(
+            next(
+                (int(row["готов"]) for row in self.cached_lobby_players
+                 if int(row["id_участника"]) == self.part),
+                0,
+            )
+        )
         self.act(lambda: self.s.ready(self.part, 0 if ready else 1))
 
     def poll(self, force=False):
@@ -1053,6 +1076,20 @@ class Window(QMainWindow):
             for action_button in state_buttons.get(state, []):
                 action_button.show()
                 action_button.setEnabled(True)
+        if my_turn and state == "ОЖИДАНИЕ_УЛУЧШЕНИЯ" and me:
+            current_cell = next(
+                (cell for cell in self.cached_board if int(cell["позиция"]) == int(me["позиция"])),
+                None,
+            )
+            if current_cell:
+                level = int(current_cell.get("колво_домов") or 0)
+                next_values = [
+                    ("1 дом", current_cell.get("рента_1_дом")),
+                    ("2 дом", current_cell.get("рента_2_дома")),
+                    ("отель", current_cell.get("рента_отель")),
+                ]
+                label, cost = next_values[level]
+                self.improve_button.setText(f"Купить {label} за {cost} ₽")
         has_mortgage = any(
             int(cell.get("id_владельца") or -1) == self.part and int(cell.get("заложена") or 0)
             for cell in self.cached_board
@@ -1067,11 +1104,6 @@ class Window(QMainWindow):
             participant_id = int(row["id_участника"])
             old_position = self.previous_positions.get(participant_id)
             new_position = int(row["позиция"])
-            if old_position is not None and old_position != new_position:
-                self.board.set_center_event(
-                    f'🚶 {row["логин"]} перемещается\n'
-                    f'{old_position} → {new_position}\n{row["клетка"]}'
-                )
         self.previous_positions = current_positions
 
     @staticmethod
@@ -1112,20 +1144,13 @@ class Window(QMainWindow):
                 self.displayed_action_ids.add(int(action["id_действия"]))
             if was_at_bottom:
                 scrollbar.setValue(scrollbar.maximum())
-        important = {
-            "БРОСОК_КУБИКА", "ПОКУПКА_СОБСТВЕННОСТИ", "ОТКАЗ_ОТ_ПОКУПКИ",
-            "ОПЛАТА_АРЕНДЫ", "КАРТА_ШАНСА", "АУКЦИОН", "ПОКУПКА_УЛУЧШЕНИЯ",
-            "БАНКРОТСТВО", "ВЫХОД_УЧАСТНИКА", "ТАЙМ_АУТ",
-        }
-        important_new = [action for action in new_actions if action.get("код_действия") in important]
-        if important_new:
-            messages = []
-            for action in important_new[-3:]:
-                message = self.action_text(action).split("] ", 1)[-1]
-                if action["код_действия"] == "ОТКАЗ_ОТ_ПОКУПКИ":
-                    message += " · Открывается аукцион"
-                messages.append(message)
-            self.board.set_center_event("\n".join(messages))
+        rent_actions = [action for action in new_actions if action.get("код_действия") == "ОПЛАТА_АРЕНДЫ"]
+        if rent_actions:
+            action = rent_actions[-1]
+            self.board.set_center_event(
+                f'{action.get("логин") or "Игрок"} → {action.get("получатель") or "владелец"}\n'
+                f'{action.get("сумма") or 0} ₽ аренды'
+            )
         self.last_action_id = max(self.last_action_id, *(int(action["id_действия"]) for action in actions))
 
     def handle_auction_invitation(self, players):
@@ -1185,21 +1210,14 @@ class Window(QMainWindow):
             self.return_to_rooms()
             return
         players = [row for row in all_players if row["код_статуса_участника"] == "В_ЛОББИ"]
-        self.render_player_cards(players)
+        self.cached_lobby_players = players
+        enough = len(players) >= 2
+        self.render_player_cards(players, enough)
         self.lobby_title.setText(self.state_row["название"])
         ready_count = sum(int(row["готов"]) for row in players)
         self.lobby_info.setText(f"Комната №{self.game}  •  игроков {len(players)}  •  готовы {ready_count}/{len(players)}")
         is_host = int(self.state_row["id_хоста"]) == self.user
         self.delete_button.setVisible(is_host)
-        enough = len(players) >= 2
-        my_ready = bool(int(me["готов"]))
-        self.ready_button.setVisible(enough)
-        self.ready_button.setEnabled(enough)
-        self.ready_button.setProperty("ready", my_ready)
-        self.ready_button.setText("Отменить готовность" if my_ready else "Я готов")
-        self.ready_button.setObjectName("danger" if my_ready else "success")
-        self.ready_button.style().unpolish(self.ready_button)
-        self.ready_button.style().polish(self.ready_button)
         if status == "ПРОВЕРКА_ГОТОВНОСТИ":
             remaining = int(self.state_row.get("секунд_до_старта") or 0)
             self.countdown.setText(f"Все готовы! Игра начнётся через {remaining} сек. Можно отменить готовность.")
@@ -1208,7 +1226,7 @@ class Window(QMainWindow):
         else:
             self.countdown.hide()
 
-    def render_player_cards(self, players):
+    def render_player_cards(self, players, enough=False):
         while self.player_cards_layout.count():
             item = self.player_cards_layout.takeAt(0)
             if item.widget():
@@ -1251,13 +1269,21 @@ class Window(QMainWindow):
             text_column = QVBoxLayout()
             role = QLabel("Участник комнаты")
             role.setStyleSheet("color:#64748b; font-size:14px;")
-            status = QLabel("✓ ГОТОВ" if ready else "Ожидает готовности")
-            status.setMinimumWidth(180)
-            status.setAlignment(Qt.AlignCenter)
-            status.setStyleSheet(
-                "background:#dcfce7; color:#15803d; padding:9px; border-radius:9px; font-weight:800;" if ready
-                else "background:#f1f5f9; color:#64748b; padding:9px; border-radius:9px; font-weight:600;"
-            )
+            is_me = int(player["id_участника"]) == self.part
+            if is_me and enough:
+                status = button(
+                    "Отменить готовность" if ready else "Я готов",
+                    self.toggle_ready,
+                    "danger" if ready else "success",
+                )
+            else:
+                status = QLabel("✓ ГОТОВ" if ready else "Ожидает готовности")
+                status.setAlignment(Qt.AlignCenter)
+                status.setStyleSheet(
+                    "color:#15803d; font-weight:800;" if ready
+                    else "color:#64748b; font-weight:600;"
+                )
+            status.setFixedSize(190, 42)
             text_column.addWidget(name)
             text_column.addWidget(role)
             card_layout.addWidget(avatar)
@@ -1287,15 +1313,14 @@ class Window(QMainWindow):
 
     def roll(self):
         try:
+            self.board.set_center_event(None)
             dice = self.s.roll(self.part)
-            self.board.set_center_event(f"🎲 Выпало {dice}\nФишка перемещается по полю…")
             self.poll(True)
         except DatabaseError as exc:
             self.alert(str(exc), True)
 
     def buy(self): self.act(lambda: self.s.buy(self.part, self.current_cell()))
     def decline_buy(self):
-        self.board.set_center_event("Отказ от покупки\nОткрывается аукцион")
         self.act(lambda: self.s.decline_buy(self.part, self.current_cell()))
     def improve(self): self.act(lambda: self.s.improve(self.part, self.current_cell()))
     def decline_improve(self): self.act(lambda: self.s.decline_improve(self.part, self.current_cell()))

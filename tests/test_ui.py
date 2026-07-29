@@ -119,7 +119,7 @@ def test_host_opens_lobby_and_sees_delete_button(monkeypatch):
     assert window.stack.currentWidget() is window.lobby_page
     assert len(window.lobby_player_cards) == 1
     assert not window.delete_button.isHidden()
-    assert window.ready_button.isHidden()
+    assert not window.lobby_player_cards[0].findChildren(main.QPushButton)
     window.close()
 
 
@@ -208,10 +208,35 @@ def test_ready_button_toggles_for_two_players(monkeypatch):
     window.stack.setCurrentWidget(window.lobby_page)
     window.poll(True)
 
-    assert not window.ready_button.isHidden()
-    assert window.ready_button.isEnabled()
-    window.ready_button.click()
+    ready_button = next(
+        control for control in window.lobby_player_cards[0].findChildren(main.QPushButton)
+        if control.text() == "Я готов"
+    )
+    assert ready_button.isEnabled()
+    ready_button.click()
     assert window.s.ready_call == (20, 1)
+    window.close()
+
+
+def test_ready_control_is_inside_player_card_and_keeps_same_size(monkeypatch):
+    window = make_window(monkeypatch)
+    window.part = 20
+    waiting = window.s.players(20)[0]
+    waiting["готов"] = 0
+    window.render_player_cards([waiting, dict(waiting, id_участника=21, логин="guest")], True)
+    ready_button = window.lobby_player_cards[0].findChild(main.QPushButton)
+    waiting_size = ready_button.size()
+
+    waiting["готов"] = 1
+    window.render_player_cards([waiting, dict(waiting, id_участника=21, логин="guest")], True)
+    cancel_button = window.lobby_player_cards[0].findChild(main.QPushButton)
+
+    assert ready_button.text() == "Я готов"
+    assert cancel_button.text() == "Отменить готовность"
+    assert cancel_button.size() == waiting_size
+    assert "Выйти из аккаунта" not in [
+        control.text() for control in window.lobby_page.findChildren(main.QPushButton)
+    ]
     window.close()
 
 

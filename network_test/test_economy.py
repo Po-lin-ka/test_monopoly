@@ -50,6 +50,34 @@ if __name__ == "__main__":
                 )
                 rent = int(cursor.callfunc("monopoly.calculate_rent", oracledb.NUMBER, [first_ownership, 6]))
                 assert rent == int(first_price * multiplier + 0.999999)
+            group_ownerships = streets[:3]
+            for level, (ownership, _price) in zip((1, 3, 0), group_ownerships):
+                cursor.execute(
+                    'UPDATE "ВЛАДЕНИЯ" SET "ID_ВЛАДЕЛЬЦА"=:owner,"КОЛВО_ДОМОВ"=:lvl_value '
+                    'WHERE "ID_ВЛАДЕНИЯ"=:ownership',
+                    owner=current,
+                    lvl_value=level,
+                    ownership=ownership,
+                )
+            first_group_rent = int(
+                cursor.callfunc("monopoly.calculate_rent", oracledb.NUMBER, [group_ownerships[0][0], 6])
+            )
+            second_group_rent = int(
+                cursor.callfunc("monopoly.calculate_rent", oracledb.NUMBER, [group_ownerships[1][0], 6])
+            )
+            assert first_group_rent == 250
+            assert second_group_rent == 386
+            group_cells = [
+                cell for cell in service.board(current)
+                if cell.get("цветовая_группа") == "ГРУППА_1"
+            ]
+            assert group_cells and all(int(cell["множитель_группы"]) == 2 for cell in group_cells)
+            cursor.execute(
+                'UPDATE "ВЛАДЕНИЯ" SET "ID_ВЛАДЕЛЬЦА"=NULL,"КОЛВО_ДОМОВ"=0 '
+                'WHERE "ID_ВЛАДЕНИЯ" IN(:second,:third)',
+                second=group_ownerships[1][0],
+                third=group_ownerships[2][0],
+            )
             cursor.execute(
                 'SELECT "ID_КЛЕТКИ" FROM "ВЛАДЕНИЯ" WHERE "ID_ВЛАДЕНИЯ"=:ownership',
                 ownership=first_ownership,
@@ -70,6 +98,39 @@ if __name__ == "__main__":
 
         with db.cursor() as cursor:
             second_ownership, second_price = streets[1]
+            cursor.execute(
+                'UPDATE "ВЛАДЕНИЯ" SET "ID_ВЛАДЕЛЬЦА"=:owner,"КОЛВО_ДОМОВ"=0 '
+                'WHERE "ID_ВЛАДЕНИЯ"=:ownership',
+                owner=current,
+                ownership=second_ownership,
+            )
+            cursor.execute(
+                'UPDATE "УЧАСТНИКИ" SET "БАЛАНС"=1500 WHERE "ID_УЧАСТНИКА"=:owner',
+                owner=current,
+            )
+            cursor.execute(
+                'UPDATE "ИГРЫ" SET "КОД_СОСТОЯНИЯ_ХОДА"=\'ОЖИДАНИЕ_УЛУЧШЕНИЯ\','
+                '"ID_ТЕКУЩЕГО_УЧАСТНИКА"=:owner WHERE "ID_ИГРЫ"=:game',
+                owner=current,
+                game=game,
+            )
+        db.connection.commit()
+        with db.cursor() as cursor:
+            cursor.execute(
+                'SELECT "ID_КЛЕТКИ" FROM "ВЛАДЕНИЯ" WHERE "ID_ВЛАДЕНИЯ"=:ownership',
+                ownership=second_ownership,
+            )
+            second_cell = int(cursor.fetchone()[0])
+        service.improve(current, second_cell)
+        with db.cursor() as cursor:
+            cursor.execute(
+                'SELECT v."КОЛВО_ДОМОВ",u."БАЛАНС" FROM "ВЛАДЕНИЯ" v '
+                'JOIN "УЧАСТНИКИ" u ON u."ID_УЧАСТНИКА"=:owner '
+                'WHERE v."ID_ВЛАДЕНИЯ"=:ownership',
+                owner=current,
+                ownership=second_ownership,
+            )
+            assert cursor.fetchone() == (1, 1500 - 138)
             cursor.execute(
                 'UPDATE "ВЛАДЕНИЯ" SET "ID_ВЛАДЕЛЬЦА"=:owner,"КОЛВО_ДОМОВ"=0 '
                 'WHERE "ID_ВЛАДЕНИЯ"=:ownership',
@@ -107,8 +168,8 @@ if __name__ == "__main__":
                 'SELECT "БАЛАНС" FROM "УЧАСТНИКИ" WHERE "ID_УЧАСТНИКА"=:owner',
                 owner=current,
             )
-            expected = -200 + first_price // 2 + 25
+            expected = -200 + first_price // 2 + 69
             assert int(cursor.fetchone()[0]) == expected
-        print("Экономика: аренда 100% + 25% за уровень и пакетное покрытие долга — OK")
+        print("Экономика: улучшения без комплекта, цена нового уровня, аренда группы ×2 и долг — OK")
     finally:
         db.close()
