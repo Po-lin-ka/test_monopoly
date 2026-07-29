@@ -10,7 +10,6 @@ WHENEVER SQLERROR EXIT SQL.SQLCODE
 @06_create_types.sql
 @07_package_spec.sql
 @08_package_body.sql
-@09_views.sql
 
 COMMIT;
 

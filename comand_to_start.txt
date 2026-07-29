@@ -1,5 +1,0 @@
-cd /mnt/projects/monopoly
-sudo systemctl start docker
-docker start monopoly-oracle
-docker logs --tail 20 monopoly-oracle
-.venv/bin/python -m app.main

@@ -16,8 +16,9 @@ from PySide6.QtWidgets import (
 from .config import settings
 from .db import Database, DatabaseError
 from .service import GameService
+from .snapshot import SnapshotThread
 
-APP_VERSION = "2026.07.29-12"
+APP_VERSION = "2026.07.29-13"
 
 RULES_TEXT = """
 Цель игры
@@ -174,6 +175,7 @@ class BoardWidget(QWidget):
         self.animation_timer = QTimer(self)
         self.animation_timer.setInterval(550)
         self.animation_timer.timeout.connect(self.advance_animation)
+        self.repaint_pending = False
         self.cell_rects = []
         self.setMinimumSize(1400, 900)
         self.setToolTip("Игровое поле: 12 клеток по кругу")
@@ -208,10 +210,20 @@ class BoardWidget(QWidget):
         }
         if self.animation_targets and not self.animation_timer.isActive():
             self.animation_timer.start()
-        self.update()
+        self.schedule_repaint()
 
     def set_center_event(self, text):
         self.center_event = text
+        self.schedule_repaint()
+
+    def schedule_repaint(self):
+        if self.repaint_pending:
+            return
+        self.repaint_pending = True
+        QTimer.singleShot(0, self.flush_repaint)
+
+    def flush_repaint(self):
+        self.repaint_pending = False
         self.update()
 
     def advance_animation(self):
@@ -228,7 +240,7 @@ class BoardWidget(QWidget):
             self.animation_targets.pop(participant_id, None)
         if not self.animation_targets:
             self.animation_timer.stop()
-        self.update()
+        self.schedule_repaint()
 
     def cell_color(self, cell):
         return "#e5e7eb" if int(cell.get("заложена") or 0) else "#ffffff"
@@ -612,8 +624,9 @@ class Window(QMainWindow):
         self.part = None
         self.game = None
         self.state_row = {}
-        self.previous_positions = {}
         self.last_action_id = 0
+        self.last_message_id = 0
+        self.state_version = -1
         self.displayed_action_ids = set()
         self.prompted_auctions = set()
         self.prompted_debt = None
@@ -623,6 +636,7 @@ class Window(QMainWindow):
         self.last_board_signature = None
         self.poll_count = 0
         self.disconnected = False
+        self.snapshot_thread = None
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
         self.login_page = self.login_ui()
@@ -636,6 +650,10 @@ class Window(QMainWindow):
         self.timer.setInterval(settings.poll_interval_ms)
         self.timer.timeout.connect(self.poll)
         self.timer.start()
+        self.local_timer = QTimer(self)
+        self.local_timer.setInterval(1000)
+        self.local_timer.timeout.connect(self.tick_local_timer)
+        self.local_timer.start()
 
     @staticmethod
     def page_header(title, subtitle):
@@ -971,11 +989,14 @@ class Window(QMainWindow):
         self.cached_board = []
         self.cached_players = []
         self.last_board_signature = None
-        self.previous_positions = {}
         self.last_action_id = 0
+        self.last_message_id = 0
+        self.state_version = -1
         self.displayed_action_ids = set()
         self.prompted_auctions = set()
         self.prompted_debt = None
+        self.action_log.clear()
+        self.chat.clear()
         self.stack.setCurrentWidget(self.lobby_page)
         self.lobby_title.setText("Подключение к комнате…")
         self.lobby_info.setText("Загружаем участников")
@@ -999,70 +1020,105 @@ class Window(QMainWindow):
             return
         if self.stack.currentWidget() not in (self.lobby_page, self.game_page) or not self.part:
             return
-        try:
-            rows = self.s.state(self.part)
-            if not rows:
-                return
-            self.state_row = rows[0]
-            self.game = int(self.state_row["id_игры"])
-            status = self.state_row["код_статуса_игры"]
-            if status in ("ОЖИДАНИЕ", "ПРОВЕРКА_ГОТОВНОСТИ"):
-                self.poll_lobby(status)
-                return
-            if status == "АКТИВНА":
-                self.stack.setCurrentWidget(self.game_page)
-                self.s.timer(self.game)
-                refreshed = self.s.state(self.part)
-                if refreshed:
-                    self.state_row = refreshed[0]
-                    status = self.state_row["код_статуса_игры"]
-                    if status == "ЗАВЕРШЕНА":
-                        self.show_finished_game()
-                        return
-            elif status == "ЗАВЕРШЕНА":
-                self.show_finished_game()
-                return
-            elif status == "ЗАБРОШЕНА":
-                self.return_to_rooms()
-                return
-            player_rows = self.s.players(self.part)
-            self.cached_players = player_rows
-            if force or self.poll_count % 2 == 0 or not self.cached_board:
-                self.cached_board = self.s.board(self.part)
-            board_signature = (
-                tuple((row.get("id_владельца"), row.get("колво_домов"), row.get("заложена")) for row in self.cached_board),
-                tuple((row["id_участника"], row["позиция"], row["код_статуса_участника"]) for row in player_rows),
+        if self.snapshot_thread is not None and self.snapshot_thread.isRunning():
+            return
+        if force:
+            self.state_version = -1
+        self.snapshot_thread = SnapshotThread(
+            self.part,
+            self.last_action_id,
+            self.last_message_id,
+            self.state_version,
+            not self.cached_board,
+            self,
+        )
+        self.snapshot_thread.completed.connect(self.apply_snapshot)
+        self.snapshot_thread.failed.connect(self.snapshot_failed)
+        self.snapshot_thread.start()
+
+    def snapshot_failed(self, message):
+        if self.part:
+            self.alert(message, True)
+
+    def apply_snapshot(self, snapshot):
+        if not self.part or not snapshot["state"]:
+            return
+        self.state_row = snapshot["state"][0]
+        self.game = int(self.state_row["id_игры"])
+        player_rows = snapshot["players"]
+        self.cached_players = player_rows
+        if snapshot["cells"]:
+            self.cached_board = snapshot["cells"]
+        if snapshot["ownerships"] and self.cached_board:
+            ownerships = {int(row["id_клетки"]): row for row in snapshot["ownerships"]}
+            for cell in self.cached_board:
+                ownership = ownerships.get(int(cell["id_клетки"]))
+                if ownership:
+                    cell.update(ownership)
+        self.state_version = int(self.state_row.get("state_version") or 0)
+        self.update_action_log(snapshot["actions"])
+        for message in snapshot["chat"]:
+            self.chat.append(
+                f'[{message["дата_время"]:%H:%M}] {message["логин"]}: {message["текст"]}'
+            )
+            self.last_message_id = max(self.last_message_id, int(message["id_сообщения"]))
+
+        status = self.state_row["код_статуса_игры"]
+        if status in ("ОЖИДАНИЕ", "ПРОВЕРКА_ГОТОВНОСТИ"):
+            self.poll_lobby(status)
+            return
+        if status == "ЗАВЕРШЕНА":
+            self.show_finished_game()
+            return
+        if status == "ЗАБРОШЕНА":
+            self.return_to_rooms()
+            return
+        self.stack.setCurrentWidget(self.game_page)
+        board_signature = (
+            self.state_version,
+            tuple((row["id_участника"], row["позиция"], row["код_статуса_участника"]) for row in player_rows),
+            self.state_row.get("id_текущего_участника"),
+            self.state_row.get("последний_кубик"),
+            self.state_row.get("последняя_карта_шанса"),
+        )
+        if board_signature != self.last_board_signature:
+            self.board.set_state(
+                self.cached_board, player_rows,
                 self.state_row.get("id_текущего_участника"),
                 self.state_row.get("последний_кубик"),
                 self.state_row.get("последняя_карта_шанса"),
             )
-            if board_signature != self.last_board_signature:
-                self.board.set_state(
-                    self.cached_board, player_rows,
-                    self.state_row.get("id_текущего_участника"),
-                    self.state_row.get("последний_кубик"),
-                    self.state_row.get("последняя_карта_шанса"),
+            self.last_board_signature = board_signature
+        self.update_game_status(player_rows)
+        self.handle_debt_dialog()
+        if self.state_row.get("код_состояния_хода") == "ПРОВЕДЕНИЕ_АУКЦИОНА":
+            self.handle_auction_invitation(player_rows)
+        self.info.setText(
+            f'{self.state_row["название"]} · {self.state_row["статус_игры"]} · '
+            f'{self.state_row.get("состояние_хода") or "-"}'
+        )
+
+    def tick_local_timer(self):
+        if not self.state_row:
+            return
+        key = (
+            "секунд_до_старта"
+            if self.state_row.get("код_статуса_игры") == "ПРОВЕРКА_ГОТОВНОСТИ"
+            else "секунд_хода"
+        )
+        if self.state_row.get(key) is not None:
+            self.state_row[key] = max(0, int(self.state_row[key]) - 1)
+        if self.stack.currentWidget() is self.game_page and self.cached_players:
+            self.update_game_status(self.cached_players)
+        elif self.stack.currentWidget() is self.lobby_page:
+            remaining = int(self.state_row.get("секунд_до_старта") or 0)
+            if self.state_row.get("код_статуса_игры") == "ПРОВЕРКА_ГОТОВНОСТИ":
+                self.countdown.setText(
+                    f"Все готовы! Игра начнётся через {remaining} сек. Можно отменить готовность."
                 )
-                self.last_board_signature = board_signature
-            self.update_game_status(player_rows)
-            self.update_movements(player_rows)
-            self.handle_debt_dialog()
-            if self.state_row.get("код_состояния_хода") == "ПРОВЕДЕНИЕ_АУКЦИОНА":
-                self.handle_auction_invitation(player_rows)
-            self.info.setText(f'{self.state_row["название"]} · {self.state_row["статус_игры"]} · {self.state_row.get("состояние_хода") or "-"}')
-            if hasattr(self.s, "actions") and (force or self.poll_count % 2 == 0):
-                self.update_action_log(self.s.actions(self.part))
-            if self.poll_count % 4 == 0:
-                try:
-                    self.chat.setPlainText("\n".join(f'[{x["дата_время"]:%H:%M}] {x["логин"]}: {x["текст"]}' for x in self.s.chat(self.part)))
-                except DatabaseError:
-                    pass
-        except DatabaseError:
-            if force:
-                raise
 
     def show_finished_game(self):
-        players = self.s.players(self.part)
+        players = self.cached_players
         winner_id = self.state_row.get("id_победителя")
         winner = next(
             (row for row in players if winner_id is not None and int(row["id_участника"]) == int(winner_id)),
@@ -1131,14 +1187,6 @@ class Window(QMainWindow):
             self.properties_button.show()
             self.properties_button.setEnabled(True)
 
-    def update_movements(self, players):
-        current_positions = {int(row["id_участника"]): int(row["позиция"]) for row in players}
-        for row in players:
-            participant_id = int(row["id_участника"])
-            old_position = self.previous_positions.get(participant_id)
-            new_position = int(row["позиция"])
-        self.previous_positions = current_positions
-
     @staticmethod
     def action_text(action):
         actor = action.get("логин") or "Банк"
@@ -1195,24 +1243,18 @@ class Window(QMainWindow):
         me = next((row for row in players if int(row["id_участника"]) == self.part), None)
         if not me or me.get("код_статуса_участника") != "АКТИВЕН":
             return
-        auction_rows = self.s.auction(self.part)
-        if not auction_rows:
+        if self.state_row.get("id_аукциона") is None:
             return
-        auction = auction_rows[0]
-        auction_id = int(auction["id_аукциона"])
-        already_answered = any(
-            row.get("id_участника") is not None and int(row["id_участника"]) == self.part
-            for row in auction_rows
-        )
-        if already_answered or auction_id in self.prompted_auctions:
+        auction_id = int(self.state_row["id_аукциона"])
+        if self.state_row.get("моя_ставка") is not None or auction_id in self.prompted_auctions:
             return
         self.prompted_auctions.add(auction_id)
-        start_price = int(auction["старт_цена"])
+        start_price = int(self.state_row["старт_цена"])
         balance = int(me["баланс"])
         answer = QMessageBox.question(
             self,
             "Начался аукцион",
-            f'{auction["название"]}\nСтартовая цена: {start_price} ₽\n'
+            f'{self.state_row["аукцион_клетка"]}\nСтартовая цена: {start_price} ₽\n'
             f'Ваш баланс: {balance} ₽\n\nХотите участвовать?',
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
@@ -1252,7 +1294,7 @@ class Window(QMainWindow):
 
     def poll_lobby(self, status):
         self.stack.setCurrentWidget(self.lobby_page)
-        all_players = self.s.players(self.part)
+        all_players = self.cached_players
         me = next((row for row in all_players if int(row["id_участника"]) == self.part), None)
         if not me or me["код_статуса_участника"] != "В_ЛОББИ":
             self.return_to_rooms()
@@ -1270,7 +1312,6 @@ class Window(QMainWindow):
             remaining = int(self.state_row.get("секунд_до_старта") or 0)
             self.countdown.setText(f"Все готовы! Игра начнётся через {remaining} сек. Можно отменить готовность.")
             self.countdown.show()
-            self.s.timer(self.game)
         else:
             self.countdown.hide()
 
@@ -1344,8 +1385,9 @@ class Window(QMainWindow):
     def return_to_rooms(self):
         self.part = self.game = None
         self.state_row = {}
-        self.previous_positions = {}
         self.last_action_id = 0
+        self.last_message_id = 0
+        self.state_version = -1
         self.displayed_action_ids = set()
         self.prompted_auctions = set()
         self.prompted_debt = None
@@ -1487,6 +1529,8 @@ class Window(QMainWindow):
             self.alert(str(exc), True)
 
     def closeEvent(self, event):
+        if self.snapshot_thread is not None and self.snapshot_thread.isRunning():
+            self.snapshot_thread.wait(5000)
         self.disconnect_on_window_close()
         self.db.close()
         super().closeEvent(event)
