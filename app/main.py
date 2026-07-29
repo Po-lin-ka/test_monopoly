@@ -17,7 +17,37 @@ from .config import settings
 from .db import Database, DatabaseError
 from .service import GameService
 
-APP_VERSION = "2026.07.29-5"
+APP_VERSION = "2026.07.29-6"
+
+RULES_TEXT = """
+Цель игры
+Остаться единственным небанкротом. Каждый игрок начинает с 1500 ₽.
+
+Ход игрока
+На ход даётся 2 минуты. Нажмите «Бросить кубик», после чего фишка автоматически
+переместится. Выпавшее число, текущий игрок и важные события показаны в центре поля
+и в журнале. После доступных действий завершите ход.
+
+Клетки
+• Старт — при полном круге начисляется 200 ₽.
+• Свободная собственность — её можно купить или отказаться и открыть аукцион.
+• Чужая собственность — аренда списывается автоматически и передаётся владельцу.
+• Шанс — случайная премия, штраф или перемещение; результат появится в центре поля.
+
+Аукцион
+Игроки, кроме отказавшегося от покупки, выбирают участие. Ставка должна быть не
+меньше половины цены клетки и не больше баланса. После ответов всех участников
+побеждает максимальная ставка; при общем отказе клетка остаётся банку.
+
+Собственность и долг
+Улучшения повышают аренду. Залог разрешён только при отрицательном балансе.
+Залог приносит половину цены, выкуп стоит 110% первоначальной цены.
+
+Тайм-аут и завершение
+Первый пропущенный ход автоматически завершается со штрафом 50 ₽. За второй
+пропущенный ход игрок объявляется банкротом. Добровольный выход из активной игры
+тоже означает банкротство. Последний активный игрок становится победителем.
+""".strip()
 
 STYLE = """
 QMainWindow, QWidget { background: #f4f7fb; color: #172033; font: 14px "DejaVu Sans"; }
@@ -111,6 +141,7 @@ class BoardWidget(QWidget):
         self.current_participant = None
         self.last_dice = None
         self.chance_text = None
+        self.current_player_name = None
         self.cell_rects = []
         self.setMinimumSize(1400, 900)
         self.setToolTip("Игровое поле: 12 клеток по кругу")
@@ -121,6 +152,12 @@ class BoardWidget(QWidget):
         self.current_participant = int(current_participant) if current_participant is not None else None
         self.last_dice = int(last_dice) if last_dice is not None else None
         self.chance_text = chance_text
+        current = next(
+            (row for row in players if current_participant is not None
+             and int(row["id_участника"]) == int(current_participant)),
+            None,
+        )
+        self.current_player_name = current.get("логин") if current else None
         self.update()
 
     def cell_color(self, cell):
@@ -149,29 +186,32 @@ class BoardWidget(QWidget):
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(center, radius_x * 0.78, radius_y * 0.78)
 
-        center_rect = QRectF(center.x() - 145, center.y() - 92, 290, 184)
+        center_rect = QRectF(center.x() - 165, center.y() - 105, 330, 210)
         painter.setPen(QPen(QColor("#bfdbfe"), 2))
         painter.setBrush(QColor("#ffffff"))
         painter.drawRoundedRect(center_rect, 22, 22)
         painter.setPen(QColor("#1e3a8a"))
+        painter.setFont(QFont("DejaVu Sans", 13, QFont.Bold))
+        turn_text = f"ХОДИТ: {self.current_player_name}" if self.current_player_name else "ОЖИДАНИЕ ХОДА"
+        painter.drawText(center_rect.adjusted(10, 9, -10, -170), Qt.AlignCenter, turn_text)
         if self.chance_text:
             painter.setFont(QFont("DejaVu Sans", 17, QFont.Bold))
-            painter.drawText(center_rect.adjusted(10, 12, -10, -135), Qt.AlignCenter, "КАРТА «ШАНС»")
+            painter.drawText(center_rect.adjusted(10, 38, -10, -130), Qt.AlignCenter, "КАРТА «ШАНС»")
             painter.setPen(QColor("#92400e"))
             painter.setFont(QFont("DejaVu Sans", 13, QFont.Bold))
             painter.drawText(
-                center_rect.adjusted(18, 48, -18, -18),
+                center_rect.adjusted(18, 76, -18, -14),
                 Qt.AlignCenter | Qt.TextWordWrap,
                 str(self.chance_text),
             )
         else:
             painter.setFont(QFont("DejaVu Sans", 16, QFont.Bold))
-            painter.drawText(center_rect.adjusted(8, 14, -8, -130), Qt.AlignCenter, "ВЫПАЛО НА КУБИКЕ")
+            painter.drawText(center_rect.adjusted(8, 40, -8, -132), Qt.AlignCenter, "ВЫПАЛО НА КУБИКЕ")
             painter.setFont(QFont("DejaVu Sans", 58, QFont.Bold))
-            painter.drawText(center_rect.adjusted(8, 43, -8, -45), Qt.AlignCenter, str(self.last_dice or "—"))
+            painter.drawText(center_rect.adjusted(8, 68, -8, -36), Qt.AlignCenter, str(self.last_dice or "—"))
             painter.setPen(QColor("#64748b"))
             painter.setFont(QFont("DejaVu Sans", 10))
-            painter.drawText(center_rect.adjusted(8, 145, -8, -12), Qt.AlignCenter, "Последний бросок")
+            painter.drawText(center_rect.adjusted(8, 176, -8, -8), Qt.AlignCenter, "Последний бросок")
 
         self.cell_rects = []
         for index, cell in enumerate(self.cells):
@@ -180,17 +220,28 @@ class BoardWidget(QWidget):
             y = center.y() + radius_y * math.sin(angle) - cell_height / 2
             rect = QRectF(x, y, cell_width, cell_height)
             self.cell_rects.append((int(cell["позиция"]), rect))
-            painter.setPen(QPen(QColor("#334155"), 2))
+            owner_id = cell.get("id_владельца")
+            owner_index = next(
+                (player_index for player_index, player in enumerate(self.players)
+                 if owner_id is not None and int(player["id_участника"]) == int(owner_id)),
+                None,
+            )
+            outline = QColor(self.TOKEN_COLORS[owner_index % len(self.TOKEN_COLORS)]) if owner_index is not None else QColor("#334155")
+            painter.setPen(QPen(outline, 7 if owner_index is not None else 2))
             painter.setBrush(QColor(self.cell_color(cell)))
             painter.drawRoundedRect(rect, 12, 12)
 
             painter.setPen(QColor("#172033"))
-            painter.setFont(QFont("DejaVu Sans", 10, QFont.Bold))
+            painter.setFont(QFont("DejaVu Sans", 12, QFont.Bold))
             name = str(cell["название"])
             if len(name) > 18:
                 name = name[:17] + "…"
             painter.drawText(rect.adjusted(7, 6, -7, -cell_height + 28), Qt.AlignCenter | Qt.TextWordWrap, name)
             details = []
+            if cell.get("тип") == "Старт":
+                details.append(f'Бонус за круг: {cell.get("бонус_старта") or 200} ₽')
+            elif cell.get("тип") == "Шанс":
+                details.extend(["Премия", "Штраф", "Перемещение"])
             if cell.get("цена_покупки") is not None:
                 details.append(f'Цена: {cell["цена_покупки"]} ₽')
             if cell.get("владелец"):
@@ -208,7 +259,7 @@ class BoardWidget(QWidget):
                     details.append(f"{marker} {label}: {amount if amount is not None else '—'} ₽")
             elif not details:
                 details.append(str(cell["тип"]))
-            painter.setFont(QFont("DejaVu Sans", 9))
+            painter.setFont(QFont("DejaVu Sans", 11))
             painter.drawText(rect.adjusted(8, 31, -8, -7), Qt.AlignCenter | Qt.TextWordWrap, "\n".join(details))
 
         by_position = {}
@@ -303,7 +354,13 @@ class StatsDialog(QDialog):
         layout.addWidget(title)
         tabs = QTabWidget()
         overview = QWidget()
-        overview_layout = QGridLayout(overview)
+        overview_layout = QVBoxLayout(overview)
+        stats_card = QFrame()
+        stats_card.setObjectName("card")
+        stats_form = QFormLayout(stats_card)
+        stats_form.setContentsMargins(30, 24, 30, 24)
+        stats_form.setHorizontalSpacing(36)
+        stats_form.setVerticalSpacing(18)
         row = stats[0] if stats else {}
         metrics = [
             ("Игрок", row.get("логин", "—")),
@@ -312,17 +369,17 @@ class StatsDialog(QDialog):
             ("Процент побед", f'{row.get("процент_побед", 0)}%'),
             ("Любимая клетка", row.get("любимая_клетка") or "Пока нет данных"),
         ]
-        for index, (label, value) in enumerate(metrics):
-            card = QFrame()
-            card.setObjectName("card")
-            card_layout = QVBoxLayout(card)
-            caption = QLabel(label)
-            caption.setObjectName("subtitle")
+        self.stat_value_labels = {}
+        for label, value in metrics:
+            caption = QLabel(f"{label}:")
+            caption.setStyleSheet("font-size:17px; font-weight:700; color:#475569;")
             number = QLabel(str(value))
-            number.setStyleSheet("font-size:24px; font-weight:800; color:#1e3a8a;")
-            card_layout.addWidget(caption)
-            card_layout.addWidget(number)
-            overview_layout.addWidget(card, index // 3, index % 3)
+            number.setStyleSheet("font-size:20px; font-weight:800; color:#1e3a8a;")
+            number.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            stats_form.addRow(caption, number)
+            self.stat_value_labels[label] = number
+        overview_layout.addWidget(stats_card)
+        overview_layout.addStretch()
         leader_rows = [{
             "Место": f"#{index}",
             "Игрок": leader["логин"],
@@ -438,6 +495,7 @@ class Window(QMainWindow):
         actions.addWidget(self.join_button)
         actions.addStretch()
         actions.addWidget(button("Статистика", self.stats))
+        actions.addWidget(button("Правила", self.show_rules))
         actions.addWidget(button("Выйти из аккаунта", self.logout, "danger"))
         self.rooms = QTableWidget()
         setup_table(self.rooms)
@@ -468,6 +526,7 @@ class Window(QMainWindow):
         self.players_panel = QWidget()
         self.player_cards_layout = QGridLayout(self.players_panel)
         self.player_cards_layout.setSpacing(16)
+        self.player_cards_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
         self.lobby_player_cards = []
         controls = QHBoxLayout()
         self.ready_button = button("Я готов", self.toggle_ready, "success")
@@ -525,6 +584,7 @@ class Window(QMainWindow):
         leave_row.addStretch()
         left.addLayout(leave_row)
         right.addWidget(QLabel("Доступные действия"))
+        right.addWidget(button("Правила игры", self.show_rules))
         self.roll_button = button("🎲 Бросить кубик", self.roll, "primary")
         self.buy_button = button("Купить собственность", self.buy, "success")
         self.decline_buy_button = button("Отказаться — открыть аукцион", self.decline_buy)
@@ -606,6 +666,22 @@ class Window(QMainWindow):
         box.setInformativeText(clean)
         box.setStandardButtons(QMessageBox.Ok)
         box.exec()
+
+    def show_rules(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Правила Monopoly Lite")
+        dialog.resize(720, 680)
+        layout = QVBoxLayout(dialog)
+        title = QLabel("Правила игры")
+        title.setObjectName("title")
+        rules = QTextEdit()
+        rules.setReadOnly(True)
+        rules.setPlainText(RULES_TEXT)
+        rules.setStyleSheet("font-size:16px; line-height:1.35;")
+        layout.addWidget(title)
+        layout.addWidget(rules)
+        layout.addWidget(button("Закрыть", dialog.accept, "primary"), alignment=Qt.AlignRight)
+        dialog.exec()
 
     def act(self, operation):
         try:
@@ -742,8 +818,14 @@ class Window(QMainWindow):
                 return
             if status == "АКТИВНА":
                 self.stack.setCurrentWidget(self.game_page)
-                if self.poll_count % 2 == 0:
-                    self.s.timer(self.game)
+                self.s.timer(self.game)
+                refreshed = self.s.state(self.part)
+                if refreshed:
+                    self.state_row = refreshed[0]
+                    status = self.state_row["код_статуса_игры"]
+                    if status == "ЗАВЕРШЕНА":
+                        self.show_finished_game()
+                        return
             elif status == "ЗАВЕРШЕНА":
                 self.show_finished_game()
                 return
@@ -752,7 +834,7 @@ class Window(QMainWindow):
                 return
             player_rows = self.s.players(self.part)
             self.cached_players = player_rows
-            if force or self.poll_count % 6 == 0 or not self.cached_board:
+            if force or self.poll_count % 2 == 0 or not self.cached_board:
                 self.cached_board = self.s.board(self.part)
             board_signature = (
                 tuple((row.get("id_владельца"), row.get("колво_домов"), row.get("заложена")) for row in self.cached_board),
@@ -858,13 +940,25 @@ class Window(QMainWindow):
     def action_text(action):
         actor = action.get("логин") or "Банк"
         cell = f' · {action["клетка"]}' if action.get("клетка") else ""
+        code = action.get("код_действия")
+        descriptions = {
+            "ОПЛАТА_АРЕНДЫ": "уплатил аренду",
+            "ПОКУПКА_СОБСТВЕННОСТИ": "приобрёл собственность",
+            "ТАЙМ_АУТ": (
+                "пропустил ход и получил штраф"
+                if action.get("сумма") is not None
+                else "получил второй тайм-аут и объявлен банкротом"
+            ),
+            "АУКЦИОН": "выиграл аукцион" if action.get("логин") else "аукцион завершён без победителя",
+        }
+        description = descriptions.get(code, action["действие"])
         if action.get("сумма") is None:
             amount = ""
-        elif action.get("код_действия") == "БРОСОК_КУБИКА":
+        elif code == "БРОСОК_КУБИКА":
             amount = f' · выпало {action["сумма"]}'
         else:
             amount = f' · {action["сумма"]} ₽'
-        return f'[{action["дата_время"]:%H:%M:%S}] {actor}: {action["действие"]}{cell}{amount}'
+        return f'[{action["дата_время"]:%H:%M:%S}] {actor}: {description}{cell}{amount}'
 
     def update_action_log(self, actions):
         if not actions:
@@ -881,7 +975,7 @@ class Window(QMainWindow):
         important = {
             "БРОСОК_КУБИКА", "ПОКУПКА_СОБСТВЕННОСТИ", "ОТКАЗ_ОТ_ПОКУПКИ",
             "ОПЛАТА_АРЕНДЫ", "КАРТА_ШАНСА", "АУКЦИОН", "ПОКУПКА_УЛУЧШЕНИЯ",
-            "БАНКРОТСТВО", "ВЫХОД_УЧАСТНИКА",
+            "БАНКРОТСТВО", "ВЫХОД_УЧАСТНИКА", "ТАЙМ_АУТ",
         }
         important_new = [action for action in new_actions if action.get("код_действия") in important]
         if important_new:
@@ -996,14 +1090,15 @@ class Window(QMainWindow):
                 placeholder_layout.addWidget(empty_icon)
                 placeholder_layout.addWidget(empty_text)
                 placeholder_layout.addStretch()
-                self.player_cards_layout.addWidget(placeholder, index, 0)
+                placeholder.setFixedSize(500, 92)
+                self.player_cards_layout.addWidget(placeholder, index // 2, index % 2)
                 self.lobby_player_cards.append(placeholder)
                 continue
             player = players[index]
             ready = bool(int(player["готов"]))
             card = QFrame()
             card.setObjectName("readyCard" if ready else "playerCard")
-            card.setMinimumHeight(88)
+            card.setFixedSize(500, 96)
             card_layout = QHBoxLayout(card)
             card_layout.setContentsMargins(18, 12, 18, 12)
             avatar = QLabel(str(player["логин"])[0].upper())
@@ -1013,14 +1108,9 @@ class Window(QMainWindow):
             avatar.setStyleSheet(f"background:{color}; color:white; border-radius:29px; font-size:24px; font-weight:800;")
             name = QLabel(str(player["логин"]))
             name.setStyleSheet("font-size:18px; font-weight:700;")
-            labels = []
-            if int(player["id_участника"]) == self.part:
-                labels.append("Это вы")
-            if int(player.get("id_пользователя", -1)) == int(self.state_row["id_хоста"]):
-                labels.append("Хозяин")
             text_column = QVBoxLayout()
-            role = QLabel(" • ".join(labels) or "Участник комнаты")
-            role.setObjectName("subtitle")
+            role = QLabel("Участник комнаты")
+            role.setStyleSheet("color:#64748b; font-size:14px;")
             status = QLabel("✓ ГОТОВ" if ready else "Ожидает готовности")
             status.setMinimumWidth(180)
             status.setAlignment(Qt.AlignCenter)
@@ -1034,7 +1124,7 @@ class Window(QMainWindow):
             card_layout.addLayout(text_column)
             card_layout.addStretch()
             card_layout.addWidget(status)
-            self.player_cards_layout.addWidget(card, index, 0)
+            self.player_cards_layout.addWidget(card, index // 2, index % 2)
             self.lobby_player_cards.append(card)
 
     def return_to_rooms(self):

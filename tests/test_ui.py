@@ -255,8 +255,10 @@ def test_board_renders_twelve_cells_and_player_tokens():
             "тип": cell_type,
             "цветовая_группа": f"ГРУППА_{1 if position < 7 else 2 if position < 11 else 3}" if cell_type == "Улица" else None,
             "цена_покупки": 100 if cell_type in ("Улица", "Коммунальная") else None,
-            "владелец": None,
+            "владелец": "host" if position == 2 else None,
+            "id_владельца": 20 if position == 2 else None,
             "колво_домов": 0,
+            "бонус_старта": 200 if position == 1 else None,
         })
     players = [{
         "id_участника": 20,
@@ -290,6 +292,39 @@ def test_dice_action_is_not_formatted_as_money():
 
     assert "выпало 6" in text
     assert "6 ₽" not in text
+
+
+def test_rent_and_timeout_actions_are_clear():
+    rent = main.Window.action_text({
+        "дата_время": datetime(2026, 7, 29, 12, 0, 0),
+        "логин": "player",
+        "действие": "Оплата аренды",
+        "код_действия": "ОПЛАТА_АРЕНДЫ",
+        "клетка": "Улица 1",
+        "сумма": 25,
+    })
+    timeout = main.Window.action_text({
+        "дата_время": datetime(2026, 7, 29, 12, 1, 0),
+        "логин": "player",
+        "действие": "Тайм-аут",
+        "код_действия": "ТАЙМ_АУТ",
+        "клетка": None,
+        "сумма": 50,
+    })
+
+    assert "уплатил аренду" in rent and "25 ₽" in rent
+    assert "пропустил ход" in timeout and "штраф" in timeout
+
+
+def test_rules_are_available_from_menu_and_game(monkeypatch):
+    window = make_window(monkeypatch)
+    room_buttons = [item.text() for item in window.rooms_page.findChildren(main.QPushButton)]
+    game_buttons = [item.text() for item in window.game_page.findChildren(main.QPushButton)]
+
+    assert "Правила" in room_buttons
+    assert "Правила игры" in game_buttons
+    assert "2 минуты" in main.RULES_TEXT
+    window.close()
 
 
 def test_action_log_can_be_collapsed(monkeypatch):

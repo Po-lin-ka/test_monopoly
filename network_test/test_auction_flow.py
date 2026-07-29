@@ -62,13 +62,7 @@ if __name__ == "__main__":
         start_price = int(auction["старт_цена"])
         service.bid(second_auction_id, second_others[0], start_price)
         service.bid(second_auction_id, second_others[1], 0)
-        with db.cursor() as cursor:
-            cursor.execute(
-                'UPDATE "АУКЦИОНЫ" SET "ДАТА_НАЧАЛА"=SYSDATE-31/86400 WHERE "ID_АУКЦИОНА"=:auction',
-                auction=second_auction_id,
-            )
-        db.connection.commit()
-        service.timer(game)
+        assert not service.auction(second_others[0])
         with db.cursor() as cursor:
             cursor.execute(
                 'SELECT "ID_ВЛАДЕЛЬЦА" FROM "ВЛАДЕНИЯ" WHERE "ID_ИГРЫ"=:game AND "ID_КЛЕТКИ"=:cell',
