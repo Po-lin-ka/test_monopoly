@@ -27,7 +27,15 @@ if __name__ == "__main__":
         started_players = service.players(participants[0])
         assert {int(row["баланс"]) for row in started_players} == {600}
         start_cell = next(cell for cell in service.board(participants[0]) if cell["тип"] == "Старт")
-        assert int(start_cell["бонус_старта"]) == 50
+        assert int(start_cell["бонус_старта"]) == 100
+        street_names = [
+            cell["название"] for cell in service.board(participants[0])
+            if cell["тип"] == "Улица"
+        ]
+        assert street_names == [
+            "Домодедовская", "Каширская", "Павелецкая", "ВДНХ",
+            "Сухаревская", "Третьяковская", "Добрынинская", "Октябрьская",
+        ]
         current = int(service.state(participants[0])[0]["id_текущего_участника"])
         payer = next(participant for participant in participants if participant != current)
         current_name = next(
@@ -125,7 +133,16 @@ if __name__ == "__main__":
                 ownership=second_ownership,
             )
             second_cell = int(cursor.fetchone()[0])
-        service.improve(current, second_cell)
+        for _level in range(3):
+            service.improve(current, second_cell)
+            if _level < 2:
+                with db.cursor() as cursor:
+                    cursor.execute(
+                        'UPDATE "ИГРЫ" SET "КОД_СОСТОЯНИЯ_ХОДА"=\'ОЖИДАНИЕ_УЛУЧШЕНИЯ\' '
+                        'WHERE "ID_ИГРЫ"=:game',
+                        game=game,
+                    )
+                db.connection.commit()
         with db.cursor() as cursor:
             cursor.execute(
                 'SELECT v."КОЛВО_ДОМОВ",u."БАЛАНС" FROM "ВЛАДЕНИЯ" v '
@@ -134,7 +151,7 @@ if __name__ == "__main__":
                 owner=current,
                 ownership=second_ownership,
             )
-            assert cursor.fetchone() == (1, 1500 - 138)
+            assert cursor.fetchone() == (3, 1500 - 28 * 3)
             cursor.execute(
                 'UPDATE "ВЛАДЕНИЯ" SET "ID_ВЛАДЕЛЬЦА"=:owner,"КОЛВО_ДОМОВ"=0 '
                 'WHERE "ID_ВЛАДЕНИЯ"=:ownership',
@@ -172,7 +189,7 @@ if __name__ == "__main__":
                 'SELECT "БАЛАНС" FROM "УЧАСТНИКИ" WHERE "ID_УЧАСТНИКА"=:owner',
                 owner=current,
             )
-            expected = -200 + first_price // 2 + 69
+            expected = -200 + first_price // 2 + 14
             assert int(cursor.fetchone()[0]) == expected
         print("Экономика: улучшения без комплекта, цена нового уровня, аренда группы ×2 и долг — OK")
     finally:

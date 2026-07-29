@@ -286,7 +286,8 @@ def test_board_renders_twelve_cells_and_player_tokens():
             "владелец": "host" if position == 2 else None,
             "id_владельца": 20 if position == 2 else None,
             "колво_домов": 0,
-            "бонус_старта": 50 if position == 1 else None,
+            "заложена": 1 if position == 2 else 0,
+            "бонус_старта": 100 if position == 1 else None,
         })
     players = [{
         "id_участника": 20,
@@ -329,6 +330,18 @@ def test_board_animates_player_cell_by_cell():
     assert widget.display_positions[20] == 3
     widget.advance_animation()
     assert widget.display_positions[20] == 4
+    widget.close()
+
+
+def test_mortgaged_street_uses_gray_background():
+    QApplication.instance() or QApplication([])
+    widget = main.BoardWidget()
+
+    assert widget.cell_color({"тип": "Улица", "заложена": 1}) == "#e5e7eb"
+    assert widget.cell_color({"тип": "Улица", "заложена": 0}) == "#ffffff"
+    assert widget.GROUP_COLORS["ГРУППА_1"] == "#9bc7a5"
+    assert widget.GROUP_COLORS["ГРУППА_2"] == "#d9a0a0"
+    assert widget.GROUP_COLORS["ГРУППА_3"] == "#bda38f"
     widget.close()
 
 
@@ -387,6 +400,23 @@ def test_latest_action_is_shown_in_board_center(monkeypatch):
     window.close()
 
 
+def test_debt_dialog_opens_automatically_for_current_player(monkeypatch):
+    window = make_window(monkeypatch)
+    window.user, window.part, window.game = 10, 20, 7
+    window.s.game_status = "АКТИВНА"
+    window.s.turn_state = "ПОКРЫТИЕ_ДОЛГА"
+    window.stack.setCurrentWidget(window.game_page)
+    calls = []
+    monkeypatch.setattr(window, "properties", lambda: calls.append("opened"))
+
+    window.poll(True)
+
+    assert calls == ["opened"]
+    window.poll(True)
+    assert calls == ["opened"]
+    window.close()
+
+
 def test_rules_are_available_from_menu_and_game(monkeypatch):
     window = make_window(monkeypatch)
     room_buttons = [item.text() for item in window.rooms_page.findChildren(main.QPushButton)]
@@ -396,7 +426,8 @@ def test_rules_are_available_from_menu_and_game(monkeypatch):
     assert "Правила игры" in game_buttons
     assert "2 минуты" in main.RULES_TEXT
     assert "1200 ₽ делится поровну" in main.RULES_TEXT
-    assert "50 ₽" in main.RULES_TEXT
+    assert "100 ₽" in main.RULES_TEXT
+    assert "25% первоначальной цены" in main.RULES_TEXT
     window.close()
 
 

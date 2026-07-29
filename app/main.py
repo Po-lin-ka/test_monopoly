@@ -17,7 +17,7 @@ from .config import settings
 from .db import Database, DatabaseError
 from .service import GameService
 
-APP_VERSION = "2026.07.29-9"
+APP_VERSION = "2026.07.29-10"
 
 RULES_TEXT = """
 Цель игры
@@ -35,7 +35,7 @@ RULES_TEXT = """
 действия завершите ход.
 
 Клетки
-• Старт — при полном круге начисляется 50 ₽.
+• Старт — при полном круге начисляется 100 ₽.
 • Свободная собственность — её можно купить или отказаться и открыть аукцион.
 • Чужая собственность — аренда автоматически переходит владельцу; платёж показан
   в центре и журнале.
@@ -45,10 +45,12 @@ RULES_TEXT = """
 
 Аренда, группы и улучшения
 Базовая аренда улицы равна цене покупки. С первым домом она составляет 125%,
-со вторым — 150%, с отелем — 175% цены улицы. Покупка каждого улучшения стоит
-ровно новую аренду этого уровня: например, для улицы 100 ₽ это 125, 150 и 175 ₽.
+со вторым — 150%, с отелем — 175% цены улицы. Покупка каждого улучшения —
+первого дома, второго дома или отеля — стоит 25% первоначальной цены улицы.
 Если один игрок владеет всеми незаложенными улицами цветовой группы, аренда каждой
 из них удваивается независимо от разных уровней улучшений.
+Зелёная группа: Домодедовская, Каширская, Павелецкая. Красная: ВДНХ,
+Сухаревская, Третьяковская. Коричневая: Добрынинская, Октябрьская.
 
 Аукцион
 Игроки, кроме отказавшегося от покупки, выбирают участие. Ставка должна быть не
@@ -56,9 +58,12 @@ RULES_TEXT = """
 побеждает максимальная ставка; при общем отказе клетка остаётся банку.
 
 Долг и залог
-Залог доступен только при отрицательном балансе и приносит половину цены объекта.
+При отрицательном балансе окно покрытия долга открывается автоматически. Залог
+приносит половину цены объекта.
 Объект с постройками сначала требует их продажи. В окне долга можно выбрать
 несколько действий и увидеть общую сумму. Выкуп стоит 110% первоначальной цены.
+Если баланс остаётся отрицательным и больше нечего продать или заложить, игрок
+немедленно становится банкротом; последний активный игрок побеждает.
 
 Тайм-аут и завершение
 Первый пропущенный ход автоматически завершается со штрафом 50 ₽. За второй
@@ -140,15 +145,15 @@ class BoardWidget(QWidget):
         "Коммунальная": "#67e8f9",
     }
     GROUP_COLORS = {
-        "Группа 1": "#93c5fd",
-        "Группа 2": "#fdba74",
-        "Группа 3": "#d8b4fe",
-        "ГРУППА_1": "#93c5fd",
-        "ГРУППА_2": "#fdba74",
-        "ГРУППА_3": "#d8b4fe",
-        "1": "#93c5fd",
-        "2": "#fdba74",
-        "3": "#d8b4fe",
+        "Группа 1": "#9bc7a5",
+        "Группа 2": "#d9a0a0",
+        "Группа 3": "#bda38f",
+        "ГРУППА_1": "#9bc7a5",
+        "ГРУППА_2": "#d9a0a0",
+        "ГРУППА_3": "#bda38f",
+        "1": "#9bc7a5",
+        "2": "#d9a0a0",
+        "3": "#bda38f",
     }
 
     def __init__(self, parent=None):
@@ -223,7 +228,7 @@ class BoardWidget(QWidget):
 
     def cell_color(self, cell):
         if cell.get("тип") == "Улица":
-            return self.GROUP_COLORS.get(str(cell.get("цветовая_группа")), "#cbd5e1")
+            return "#e5e7eb" if int(cell.get("заложена") or 0) else "#ffffff"
         return self.CELL_COLORS.get(cell.get("тип"), "#e2e8f0")
 
     def paintEvent(self, _event):
@@ -298,11 +303,28 @@ class BoardWidget(QWidget):
             painter.drawRoundedRect(rect, 12, 12)
 
             painter.setPen(QColor("#172033"))
-            painter.setFont(QFont("DejaVu Sans", 12, QFont.Bold))
             name = str(cell["название"])
             if len(name) > 18:
                 name = name[:17] + "…"
-            painter.drawText(rect.adjusted(7, 6, -7, -cell_height + 28), Qt.AlignCenter | Qt.TextWordWrap, name)
+            detail_top = 31
+            if cell.get("тип") == "Улица":
+                stripe_height = cell_height / 6
+                stripe = QRectF(rect.left(), rect.top(), rect.width(), stripe_height)
+                stripe_color = (
+                    "#9ca3af" if int(cell.get("заложена") or 0)
+                    else self.GROUP_COLORS.get(str(cell.get("цветовая_группа")), "#cbd5e1")
+                )
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(stripe_color))
+                painter.drawRoundedRect(stripe, 10, 10)
+                painter.drawRect(QRectF(stripe.left(), stripe.bottom() - 10, stripe.width(), 10))
+                painter.setPen(QColor("#172033"))
+                painter.setFont(QFont("DejaVu Sans", 10, QFont.Bold))
+                painter.drawText(stripe.adjusted(5, 1, -5, -1), Qt.AlignCenter, name)
+                detail_top = int(stripe_height) + 4
+            else:
+                painter.setFont(QFont("DejaVu Sans", 12, QFont.Bold))
+                painter.drawText(rect.adjusted(7, 6, -7, -cell_height + 28), Qt.AlignCenter | Qt.TextWordWrap, name)
             details = []
             if cell.get("тип") == "Старт":
                 details.append(f'Бонус за круг: {cell.get("бонус_старта") or 50} ₽')
@@ -312,6 +334,8 @@ class BoardWidget(QWidget):
                 details.append(f'Цена: {cell["цена_покупки"]} ₽')
             if cell.get("владелец"):
                 details.append(f'Владелец: {cell["владелец"]}')
+            if int(cell.get("заложена") or 0):
+                details.append("ЗАЛОЖЕНО · аренда 0 ₽")
             if cell.get("тип") == "Улица":
                 level = int(cell.get("колво_домов") or 0)
                 multiplier = int(cell.get("множитель_группы") or 1)
@@ -329,8 +353,8 @@ class BoardWidget(QWidget):
                     details.append(f"{marker} {label}: {shown_amount} ₽")
             elif not details:
                 details.append(str(cell["тип"]))
-            painter.setFont(QFont("DejaVu Sans", 11))
-            painter.drawText(rect.adjusted(8, 31, -8, -7), Qt.AlignCenter | Qt.TextWordWrap, "\n".join(details))
+            painter.setFont(QFont("DejaVu Sans", 9 if int(cell.get("заложена") or 0) else 11))
+            painter.drawText(rect.adjusted(8, detail_top, -8, -7), Qt.AlignCenter | Qt.TextWordWrap, "\n".join(details))
 
         by_position = {}
         for player_index, player in enumerate(self.players):
@@ -582,6 +606,7 @@ class Window(QMainWindow):
         self.last_action_id = 0
         self.displayed_action_ids = set()
         self.prompted_auctions = set()
+        self.prompted_debt = None
         self.cached_board = []
         self.cached_players = []
         self.cached_lobby_players = []
@@ -940,6 +965,7 @@ class Window(QMainWindow):
         self.last_action_id = 0
         self.displayed_action_ids = set()
         self.prompted_auctions = set()
+        self.prompted_debt = None
         self.stack.setCurrentWidget(self.lobby_page)
         self.lobby_title.setText("Подключение к комнате…")
         self.lobby_info.setText("Загружаем участников")
@@ -1010,6 +1036,7 @@ class Window(QMainWindow):
                 self.last_board_signature = board_signature
             self.update_game_status(player_rows)
             self.update_movements(player_rows)
+            self.handle_debt_dialog()
             if self.state_row.get("код_состояния_хода") == "ПРОВЕДЕНИЕ_АУКЦИОНА":
                 self.handle_auction_invitation(player_rows)
             self.info.setText(f'{self.state_row["название"]} · {self.state_row["статус_игры"]} · {self.state_row.get("состояние_хода") or "-"}')
@@ -1082,12 +1109,9 @@ class Window(QMainWindow):
             )
             if current_cell:
                 level = int(current_cell.get("колво_домов") or 0)
-                next_values = [
-                    ("1 дом", current_cell.get("рента_1_дом")),
-                    ("2 дом", current_cell.get("рента_2_дома")),
-                    ("отель", current_cell.get("рента_отель")),
-                ]
-                label, cost = next_values[level]
+                labels = ["1 дом", "2 дом", "отель"]
+                label = labels[level]
+                cost = current_cell.get("цена_дома")
                 self.improve_button.setText(f"Купить {label} за {cost} ₽")
         has_mortgage = any(
             int(cell.get("id_владельца") or -1) == self.part and int(cell.get("заложена") or 0)
@@ -1198,6 +1222,19 @@ class Window(QMainWindow):
         )
         self.act(lambda: self.s.bid(auction_id, self.part, amount if accepted else 0))
 
+    def handle_debt_dialog(self):
+        state = self.state_row.get("код_состояния_хода")
+        current_id = self.state_row.get("id_текущего_участника")
+        if state != "ПОКРЫТИЕ_ДОЛГА" or current_id is None or int(current_id) != self.part:
+            if state != "ПОКРЫТИЕ_ДОЛГА":
+                self.prompted_debt = None
+            return
+        debt_key = (self.game, self.state_row.get("время_начала_хода"))
+        if self.prompted_debt == debt_key:
+            return
+        self.prompted_debt = debt_key
+        self.properties()
+
     def toggle_action_log(self):
         visible = not self.action_log.isHidden()
         self.action_log.setVisible(not visible)
@@ -1301,6 +1338,7 @@ class Window(QMainWindow):
         self.last_action_id = 0
         self.displayed_action_ids = set()
         self.prompted_auctions = set()
+        self.prompted_debt = None
         self.cached_board = []
         self.cached_players = []
         self.last_board_signature = None

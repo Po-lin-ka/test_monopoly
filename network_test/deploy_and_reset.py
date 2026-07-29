@@ -30,10 +30,25 @@ if __name__ == "__main__":
                    SET "БАЗОВАЯ_РЕНТА"="ЦЕНА_ПОКУПКИ",
                        "РЕНТА_1_ДОМ"=CEIL("ЦЕНА_ПОКУПКИ"*1.25),
                        "РЕНТА_2_ДОМА"=CEIL("ЦЕНА_ПОКУПКИ"*1.50),
-                       "РЕНТА_ОТЕЛЬ"=CEIL("ЦЕНА_ПОКУПКИ"*1.75)
+                       "РЕНТА_ОТЕЛЬ"=CEIL("ЦЕНА_ПОКУПКИ"*1.75),
+                       "ЦЕНА_ДОМА"=CEIL("ЦЕНА_ПОКУПКИ"*0.25)
                  WHERE "ТИП"='Улица'
             """)
-            cursor.execute('UPDATE "КЛЕТКИ" SET "БОНУС_СТАРТА"=50 WHERE "ТИП"=\'Старт\'')
+            cursor.execute('UPDATE "КЛЕТКИ" SET "БОНУС_СТАРТА"=100 WHERE "ТИП"=\'Старт\'')
+            cursor.execute("""
+                MERGE INTO "КЛЕТКИ" c
+                USING (
+                    SELECT 2 p,'Домодедовская' n,'ГРУППА_1' g FROM dual UNION ALL
+                    SELECT 3,'Каширская','ГРУППА_1' FROM dual UNION ALL
+                    SELECT 5,'Павелецкая','ГРУППА_1' FROM dual UNION ALL
+                    SELECT 7,'ВДНХ','ГРУППА_2' FROM dual UNION ALL
+                    SELECT 8,'Сухаревская','ГРУППА_2' FROM dual UNION ALL
+                    SELECT 10,'Третьяковская','ГРУППА_2' FROM dual UNION ALL
+                    SELECT 11,'Добрынинская','ГРУППА_3' FROM dual UNION ALL
+                    SELECT 12,'Октябрьская','ГРУППА_3' FROM dual
+                ) x ON (c."ПОЗИЦИЯ"=x.p)
+                WHEN MATCHED THEN UPDATE SET c."НАЗВАНИЕ"=x.n,c."ЦВЕТОВАЯ_ГРУППА"=x.g
+            """)
             cursor.execute("""
                 BEGIN
                     EXECUTE IMMEDIATE 'ALTER TABLE "УЧАСТНИКИ" DROP CONSTRAINT "UQ_УЧ_ИГРА_ОЧ"';
