@@ -15,6 +15,14 @@ if __name__ == "__main__":
     db = Database()
     try:
         with db.cursor() as cursor:
+            cursor.execute("""
+                BEGIN
+                    EXECUTE IMMEDIATE 'ALTER TABLE "ИГРЫ" ADD "ПОСЛЕДНЯЯ_КАРТА_ШАНСА" VARCHAR2(255 CHAR)';
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        IF SQLCODE != -1430 THEN RAISE; END IF;
+                END;
+            """)
             cursor.execute(oracle_source("database/07_package_spec.sql"))
             cursor.execute(oracle_source("database/08_package_body.sql"))
             cursor.execute("""

@@ -32,6 +32,7 @@ CREATE TABLE "ИГРЫ" (
  "КОД_СТАТУСА_ИГРЫ" VARCHAR2(40 CHAR) NOT NULL,"НАЗВАНИЕ" VARCHAR2(100 CHAR) NOT NULL,"ПАРОЛЬ_ХЭШ" VARCHAR2(255 CHAR),
  "ДАТА_СОЗДАНИЯ" DATE DEFAULT SYSDATE NOT NULL,"ДАТА_СТАРТА" DATE,"ДАТА_ЗАВЕРШЕНИЯ" DATE,
  "МАКС_ИГРОКОВ" NUMBER(1) NOT NULL,"ВРЕМЯ_НАЧАЛА_ХОДА" DATE,"КОД_СОСТОЯНИЯ_ХОДА" VARCHAR2(40 CHAR),
+ "ПОСЛЕДНЯЯ_КАРТА_ШАНСА" VARCHAR2(255 CHAR),
  CONSTRAINT "FK_ИГРЫ_ХОСТ" FOREIGN KEY ("ID_ХОСТА") REFERENCES "ПОЛЬЗОВАТЕЛИ"("ID_ПОЛЬЗОВАТЕЛЯ"),
  CONSTRAINT "FK_ИГРЫ_СТАТУС" FOREIGN KEY ("КОД_СТАТУСА_ИГРЫ") REFERENCES "СТАТУСЫ_ИГР"("КОД_СТАТУСА_ИГРЫ"),
  CONSTRAINT "FK_ИГРЫ_СОСТ" FOREIGN KEY ("КОД_СОСТОЯНИЯ_ХОДА") REFERENCES "СОСТОЯНИЯ_ХОДА"("КОД_СОСТОЯНИЯ_ХОДА"),

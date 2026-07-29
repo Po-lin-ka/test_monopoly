@@ -19,7 +19,9 @@ class FakeService:
         self.game_status = "ОЖИДАНИЕ"
         self.ready_call = None
         self.current_participant = 20
+        self.turn_state = "ОЖИДАНИЕ_БРОСКА"
         self.left_game = None
+        self.bid_call = None
 
     def state(self, _participant):
         return [{
@@ -28,8 +30,9 @@ class FakeService:
             "код_статуса_игры": self.game_status,
             "статус_игры": "Ожидание" if self.game_status == "ОЖИДАНИЕ" else "Активна",
             "состояние_хода": None,
-            "код_состояния_хода": "ОЖИДАНИЕ_БРОСКА" if self.game_status == "АКТИВНА" else None,
+            "код_состояния_хода": self.turn_state if self.game_status == "АКТИВНА" else None,
             "id_текущего_участника": self.current_participant if self.game_status == "АКТИВНА" else None,
+            "id_победителя": 20 if self.game_status == "ЗАВЕРШЕНА" else None,
             "id_хоста": 10,
         }]
 
@@ -81,6 +84,17 @@ class FakeService:
 
     def leave_game(self, participant):
         self.left_game = participant
+
+    def auction(self, participant):
+        return [{
+            "id_аукциона": 55,
+            "название": "Улица 1",
+            "старт_цена": 50,
+            "id_участника": None,
+        }]
+
+    def bid(self, auction, participant, amount):
+        self.bid_call = (auction, participant, amount)
 
 
 def make_window(monkeypatch):
@@ -301,4 +315,34 @@ def test_leave_game_requires_confirmation(monkeypatch):
 
     assert window.s.left_game is None
     assert window.part == 20
+    window.close()
+
+
+def test_finished_game_shows_winner_and_exit_page(monkeypatch):
+    window = make_window(monkeypatch)
+    window.user, window.part, window.game = 10, 20, 7
+    window.s.game_status = "ЗАВЕРШЕНА"
+    window.stack.setCurrentWidget(window.game_page)
+
+    window.poll(True)
+
+    assert window.stack.currentWidget() is window.finish_page
+    assert window.winner_label.text() == "Победитель: host"
+    assert "1500 ₽" in window.finish_details.text()
+    window.close()
+
+
+def test_auction_invitation_refusal_records_zero_bid(monkeypatch):
+    window = make_window(monkeypatch)
+    window.user, window.part, window.game = 10, 20, 7
+    window.s.game_status = "АКТИВНА"
+    window.s.current_participant = 21
+    window.s.turn_state = "ПРОВЕДЕНИЕ_АУКЦИОНА"
+    window.stack.setCurrentWidget(window.game_page)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.No)
+
+    window.poll(True)
+
+    assert window.s.bid_call == (55, 20, 0)
+    assert 55 in window.prompted_auctions
     window.close()

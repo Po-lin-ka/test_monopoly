@@ -27,6 +27,17 @@ if __name__ == "__main__":
         state = service.state(host_participant)[0]
         owner = int(state["id_текущего_участника"])
         with db.cursor() as cursor:
+            cursor.execute('SELECT "ID_КЛЕТКИ" FROM "КЛЕТКИ" WHERE "ПОЗИЦИЯ"=6')
+            chance_cell = int(cursor.fetchone()[0])
+            cursor.execute(
+                'UPDATE "УЧАСТНИКИ" SET "ID_ПОЗИЦИИ"=:cell WHERE "ID_УЧАСТНИКА"=:owner',
+                cell=chance_cell, owner=owner,
+            )
+        db.connection.commit()
+        db.callproc("monopoly.apply_chance", [owner, 1])
+        assert service.state(owner)[0]["последняя_карта_шанса"]
+
+        with db.cursor() as cursor:
             cursor.execute(
                 'SELECT "ID_ВЛАДЕНИЯ" FROM "ВЛАДЕНИЯ" v JOIN "КЛЕТКИ" c ON c."ID_КЛЕТКИ"=v."ID_КЛЕТКИ" '
                 'WHERE v."ID_ИГРЫ"=:game AND c."ПОЗИЦИЯ"=2',
