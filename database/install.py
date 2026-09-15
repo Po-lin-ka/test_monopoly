@@ -23,7 +23,7 @@ def statements(path: Path):
     block = False
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
-        if not line or line.startswith(("SET ", "WHENEVER ", "SHOW ", "PROMPT ", "@")):
+        if not line or line.startswith(("SET ", "WHENEVER ", "SHOW ", "PROMPT ", "@", "--")):
             continue
         if line == "/" and not buffer:
             continue
@@ -63,7 +63,8 @@ def install():
             )
             statuses = cursor.fetchall()
             if not statuses or any(status != "VALID" for _, status in statuses):
-                raise RuntimeError(f"Пакет MONOPOLY невалиден: {statuses}")
+                cursor.execute("SELECT type,line,position,text FROM user_errors WHERE name='MONOPOLY' ORDER BY type,line")
+                raise RuntimeError(f"Пакет MONOPOLY невалиден: {statuses}; ошибки: {cursor.fetchall()}")
         database.connection.commit()
         print("Схема установлена. Пакет MONOPOLY: VALID.")
     except Exception:

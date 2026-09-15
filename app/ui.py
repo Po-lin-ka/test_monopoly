@@ -626,7 +626,6 @@ class Window(QMainWindow):
         self.state_row = {}
         self.last_action_id = 0
         self.last_message_id = 0
-        self.version_sostoyaniya = -1
         self.displayed_action_ids = set()
         self.prompted_auctions = set()
         self.prompted_debt = None
@@ -991,7 +990,6 @@ class Window(QMainWindow):
         self.last_board_signature = None
         self.last_action_id = 0
         self.last_message_id = 0
-        self.version_sostoyaniya = -1
         self.displayed_action_ids = set()
         self.prompted_auctions = set()
         self.prompted_debt = None
@@ -1022,14 +1020,10 @@ class Window(QMainWindow):
             return
         if self.snapshot_thread is not None and self.snapshot_thread.isRunning():
             return
-        if force:
-            self.version_sostoyaniya = -1
         self.snapshot_thread = SnapshotThread(
             self.part,
             self.last_action_id,
             self.last_message_id,
-            self.version_sostoyaniya,
-            not self.cached_board,
             self,
         )
         self.snapshot_thread.completed.connect(self.apply_snapshot)
@@ -1055,7 +1049,6 @@ class Window(QMainWindow):
                 ownership = ownerships.get(int(cell["id_клетки"]))
                 if ownership:
                     cell.update(ownership)
-        self.version_sostoyaniya = int(self.state_row.get("версия_состояния") or 0)
         self.update_action_log(snapshot["actions"])
         for message in snapshot["chat"]:
             self.chat.append(
@@ -1075,7 +1068,9 @@ class Window(QMainWindow):
             return
         self.stack.setCurrentWidget(self.game_page)
         board_signature = (
-            self.version_sostoyaniya,
+            tuple((row.get("id_владения"), row.get("id_владельца"),
+                   row.get("колво_домов"), row.get("заложена"),
+                   row.get("множитель_группы")) for row in self.cached_board),
             tuple((row["id_участника"], row["позиция"], row["код_статуса_участника"]) for row in player_rows),
             self.state_row.get("id_текущего_участника"),
             self.state_row.get("последний_кубик"),
@@ -1387,7 +1382,6 @@ class Window(QMainWindow):
         self.state_row = {}
         self.last_action_id = 0
         self.last_message_id = 0
-        self.version_sostoyaniya = -1
         self.displayed_action_ids = set()
         self.prompted_auctions = set()
         self.prompted_debt = None
@@ -1397,11 +1391,6 @@ class Window(QMainWindow):
         self.stack.setCurrentWidget(self.rooms_page)
         self.refresh_rooms()
 
-    def current_cell(self):
-        me = next(row for row in self.cached_players if int(row["id_участника"]) == self.part)
-        position = int(me["позиция"])
-        return int(next(row["id_клетки"] for row in self.cached_board if int(row["позиция"]) == position))
-
     def roll(self):
         try:
             self.board.set_center_event(None)
@@ -1410,11 +1399,11 @@ class Window(QMainWindow):
         except DatabaseError as exc:
             self.alert(str(exc), True)
 
-    def buy(self): self.act(lambda: self.s.buy(self.part, self.current_cell()))
+    def buy(self): self.act(lambda: self.s.buy(self.part))
     def decline_buy(self):
-        self.act(lambda: self.s.decline_buy(self.part, self.current_cell()))
-    def improve(self): self.act(lambda: self.s.improve(self.part, self.current_cell()))
-    def decline_improve(self): self.act(lambda: self.s.decline_improve(self.part, self.current_cell()))
+        self.act(lambda: self.s.decline_buy(self.part))
+    def improve(self): self.act(lambda: self.s.improve(self.part))
+    def decline_improve(self): self.act(lambda: self.s.decline_improve(self.part))
     def end(self): self.act(lambda: self.s.end(self.game))
 
     def properties(self):

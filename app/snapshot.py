@@ -15,8 +15,6 @@ class SnapshotThread(QThread):
         participant_id: int,
         last_action_id: int,
         last_message_id: int,
-        known_version: int,
-        include_static: bool,
         parent=None,
     ):
         super().__init__(parent)
@@ -24,8 +22,6 @@ class SnapshotThread(QThread):
             participant_id,
             last_action_id,
             last_message_id,
-            known_version,
-            include_static,
         )
 
     def run(self):
