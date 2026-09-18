@@ -45,11 +45,11 @@ def statements(path: Path):
         yield "\n".join(buffer)
 
 
-def install():
+def install(sources=SOURCES, message="Схема установлена. Пакет MONOPOLY: VALID."):
     database = Database()
     try:
         with database.cursor() as cursor:
-            for source in SOURCES:
+            for source in sources:
                 for statement in statements(ROOT / source):
                     try:
                         cursor.execute(statement)
@@ -66,9 +66,9 @@ def install():
                 cursor.execute("SELECT type,line,position,text FROM user_errors WHERE name='MONOPOLY' ORDER BY type,line")
                 raise RuntimeError(f"Пакет MONOPOLY невалиден: {statuses}; ошибки: {cursor.fetchall()}")
         database.connection.commit()
-        print("Схема установлена. Пакет MONOPOLY: VALID.")
+        print(message)
     except Exception:
-        database.connection.rollback()
+        database.rollback_safely()
         raise
     finally:
         database.close()

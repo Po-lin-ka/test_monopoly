@@ -14,11 +14,11 @@ from PySide6.QtWidgets import (
 )
 
 from .config import settings
-from .db import Database, DatabaseError
+from .db import ConnectionLost, Database, DatabaseError
 from .service import GameService
-from .snapshot import SnapshotThread
+from .snapshot import ReconnectThread, SnapshotThread
 
-APP_VERSION = "2026.07.29-14"
+APP_VERSION = "2026.09.18-15"
 
 RULES_TEXT = """
 Цель игры
@@ -636,6 +636,10 @@ class Window(QMainWindow):
         self.poll_count = 0
         self.disconnected = False
         self.snapshot_thread = None
+        self.reconnect_thread = None
+        self.reconnecting = False
+        self.connection_lost = False
+        self.closing = False
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
         self.login_page = self.login_ui()
@@ -887,18 +891,77 @@ class Window(QMainWindow):
         dialog.exec()
 
     def act(self, operation):
+        if self.connection_lost or self.closing:
+            return
         try:
             operation()
             self.poll()
         except (DatabaseError, RuntimeError) as exc:
+            self.report_error(exc)
+
+    def report_error(self, exc):
+        if isinstance(exc, ConnectionLost):
+            self.connection_lost = True
+            self.stack.setEnabled(False)
+            self.statusBar().showMessage(
+                "Связь с сервером потеряна. Переподключение… "
+                "Последнее действие будет проверено по состоянию игры."
+            )
+        else:
             self.alert(str(exc), True)
+
+    def start_reconnect(self):
+        if self.reconnecting:
+            return
+        if self.reconnect_thread is not None and self.reconnect_thread.isRunning():
+            return
+        if self.snapshot_thread is not None and self.snapshot_thread.isRunning():
+            return
+        if self.reconnect_thread is not None:
+            self.reconnect_thread.deleteLater()
+        self.reconnect_thread = ReconnectThread(
+            self.part, self.last_action_id, self.last_message_id, self,
+        )
+        self.reconnect_thread.finished.connect(self.reconnect_finished)
+        self.reconnecting = True
+        self.reconnect_thread.start()
+
+    def reconnect_finished(self):
+        self.reconnecting = False
+        worker = self.reconnect_thread
+        if self.closing:
+            if worker.database is not None:
+                worker.database.close()
+                worker.database = None
+            self.close()
+            return
+        if worker.error is not None:
+            # Таймер повторит только соединение и чтение, никогда игровую команду.
+            self.statusBar().showMessage(
+                "Не удалось восстановить связь. Повторная попытка через несколько секунд. "
+                + str(worker.error).split("ORA-06512")[0].strip()
+            )
+            return
+        self.db.close()
+        self.db = worker.database
+        worker.database = None
+        self.s = GameService(self.db)
+        self.connection_lost = False
+        self.prompted_auctions.clear()
+        self.prompted_debt = None
+        self.stack.setEnabled(True)
+        self.statusBar().showMessage("Связь восстановлена. Состояние игры обновлено.", 8000)
+        if worker.snapshot is not None and worker.arguments[0] == self.part:
+            self.apply_snapshot(worker.snapshot)
+        elif self.stack.currentWidget() is self.rooms_page:
+            self.refresh_rooms()
 
     def register(self):
         try:
             self.s.register(self.le.text(), self.pe.text())
             self.alert("Регистрация выполнена. Теперь войдите в аккаунт.")
         except DatabaseError as exc:
-            self.alert(str(exc), True)
+            self.report_error(exc)
 
     def login(self):
         try:
@@ -906,7 +969,7 @@ class Window(QMainWindow):
             self.stack.setCurrentWidget(self.rooms_page)
             self.refresh_rooms()
         except DatabaseError as exc:
-            self.alert(str(exc), True)
+            self.report_error(exc)
 
     def logout(self):
         try:
@@ -919,7 +982,7 @@ class Window(QMainWindow):
                 elif status == "ЗАВЕРШЕНА":
                     self.s.disconnect(self.part)
         except DatabaseError as exc:
-            self.alert(str(exc), True)
+            self.report_error(exc)
             return
         self.user = self.part = self.game = None
         self.state_row = {}
@@ -951,7 +1014,7 @@ class Window(QMainWindow):
                         self.rooms.selectRow(row)
                         break
         except DatabaseError as exc:
-            self.alert(str(exc), True)
+            self.report_error(exc)
 
     def create(self):
         dialog = CreateDialog(self)
@@ -961,7 +1024,7 @@ class Window(QMainWindow):
             game_id = self.s.create_game(self.user, dialog.name.text(), dialog.player_count(), dialog.password.text())
             self.open_room(game_id)
         except DatabaseError as exc:
-            self.alert(str(exc), True)
+            self.report_error(exc)
 
     def join(self):
         row = self.rooms.currentRow()
@@ -979,7 +1042,7 @@ class Window(QMainWindow):
             self.s.join(self.user, game_id, password)
             self.open_room(game_id)
         except DatabaseError as exc:
-            self.alert(str(exc), True)
+            self.report_error(exc)
 
     def open_room(self, game_id):
         """Один и тот же переход в лобби для хозяина и присоединившихся игроков."""
@@ -1013,6 +1076,11 @@ class Window(QMainWindow):
         self.act(lambda: self.s.ready(self.part, 0 if ready else 1))
 
     def poll(self):
+        if self.closing:
+            return
+        if self.connection_lost:
+            self.start_reconnect()
+            return
         self.poll_count += 1
         if self.stack.currentWidget() is self.rooms_page:
             if self.poll_count % 5 == 0:
@@ -1022,6 +1090,8 @@ class Window(QMainWindow):
             return
         if self.snapshot_thread is not None and self.snapshot_thread.isRunning():
             return
+        if self.snapshot_thread is not None:
+            self.snapshot_thread.deleteLater()
         self.snapshot_thread = SnapshotThread(
             self.part,
             self.last_action_id,
@@ -1030,13 +1100,26 @@ class Window(QMainWindow):
         )
         self.snapshot_thread.completed.connect(self.apply_snapshot)
         self.snapshot_thread.failed.connect(self.snapshot_failed)
+        self.snapshot_thread.finished.connect(self.snapshot_finished)
         self.snapshot_thread.start()
 
-    def snapshot_failed(self, message):
+    def snapshot_finished(self):
+        if self.closing:
+            self.close()
+
+    def snapshot_failed(self, error):
+        worker = self.sender()
+        if self.closing or (worker is not None and worker.arguments[0] != self.part):
+            return
         if self.part:
-            self.alert(message, True)
+            self.report_error(error)
 
     def apply_snapshot(self, snapshot):
+        worker = self.sender()
+        if self.closing or self.connection_lost:
+            return
+        if isinstance(worker, SnapshotThread) and worker.arguments[0] != self.part:
+            return
         if not self.part or not snapshot["state"]:
             return
         self.state_row = snapshot["state"][0]
@@ -1059,6 +1142,11 @@ class Window(QMainWindow):
             self.last_message_id = max(self.last_message_id, int(message["id_сообщения"]))
 
         status = self.state_row["код_статуса_игры"]
+        me = next((row for row in player_rows if int(row["id_участника"]) == self.part), None)
+        if me and me.get("код_статуса_участника") == "ПОКИНУЛ":
+            self.return_to_rooms()
+            self.alert("Вы исключены из партии: выход или отсутствие связи более 60 секунд.")
+            return
         if status in ("ОЖИДАНИЕ", "ПРОВЕРКА_ГОТОВНОСТИ"):
             self.poll_lobby(status)
             return
@@ -1394,12 +1482,14 @@ class Window(QMainWindow):
         self.refresh_rooms()
 
     def roll(self):
+        if self.connection_lost or self.closing:
+            return
         try:
             self.board.set_center_event(None)
             dice = self.s.roll(self.part)
             self.poll()
         except DatabaseError as exc:
-            self.alert(str(exc), True)
+            self.report_error(exc)
 
     def buy(self): self.act(lambda: self.s.buy(self.part))
     def decline_buy(self):
@@ -1453,7 +1543,7 @@ class Window(QMainWindow):
             ownership_id = int(item.split(":")[0])
             self.act(lambda: self.s.redeem(self.part, ownership_id))
         except DatabaseError as exc:
-            self.alert(str(exc), True)
+            self.report_error(exc)
 
     def bid(self):
         try:
@@ -1465,7 +1555,7 @@ class Window(QMainWindow):
             if accepted:
                 self.act(lambda: self.s.bid(int(auction[0]["id_аукциона"]), self.part, amount))
         except DatabaseError as exc:
-            self.alert(str(exc), True)
+            self.report_error(exc)
 
     def send(self):
         text = self.msg.text().strip()
@@ -1484,7 +1574,7 @@ class Window(QMainWindow):
                 self.s.disconnect(self.part)
             self.return_to_rooms()
         except DatabaseError as exc:
-            self.alert(str(exc), True)
+            self.report_error(exc)
 
     def confirm_leave_game(self):
         answer = QMessageBox.question(
@@ -1508,7 +1598,7 @@ class Window(QMainWindow):
             self.s.delete_room(self.user, self.game)
             self.return_to_rooms()
         except DatabaseError as exc:
-            self.alert(str(exc), True)
+            self.report_error(exc)
 
     def stats(self):
         try:
@@ -1519,19 +1609,22 @@ class Window(QMainWindow):
                 self,
             ).exec()
         except DatabaseError as exc:
-            self.alert(str(exc), True)
+            self.report_error(exc)
 
     def closeEvent(self, event):
-        if self.snapshot_thread is not None and self.snapshot_thread.isRunning():
-            self.snapshot_thread.wait(5000)
+        self.closing = True
+        self.timer.stop()
+        self.local_timer.stop()
+        self.stack.setEnabled(False)
+        # Не уничтожаем работающий QThread: finished повторно закроет окно.
+        workers = (self.snapshot_thread, self.reconnect_thread)
+        if any(worker is not None and worker.isRunning() for worker in workers):
+            self.statusBar().showMessage("Завершение соединения…")
+            event.ignore()
+            return
         self.disconnect_on_window_close()
         self.db.close()
         super().closeEvent(event)
-
-    def changeEvent(self, event):
-        super().changeEvent(event)
-        if self.isMinimized():
-            self.disconnect_on_window_close()
 
     def disconnect_on_window_close(self):
         if self.disconnected or not self.part:
@@ -1539,16 +1632,16 @@ class Window(QMainWindow):
         self.disconnected = True
         try:
             status = self.state_row.get("код_статуса_игры")
-            if status in ("АКТИВНА", "ЗАВЕРШЕНА") and hasattr(self.s, "disconnect"):
-                self.s.disconnect(self.part)
-            elif status in ("ОЖИДАНИЕ", "ПРОВЕРКА_ГОТОВНОСТИ"):
-                self.s.leave_lobby(self.part)
-        except (DatabaseError, AttributeError):
+            if not self.connection_lost:
+                if status in ("АКТИВНА", "ЗАВЕРШЕНА"):
+                    self.s.disconnect(self.part)
+                else:
+                    self.s.leave_lobby(self.part)
+        except DatabaseError:
+            # При обрыве активного игрока исключит heartbeat оставшихся клиентов.
             pass
         self.part = self.game = None
         self.state_row = {}
-        if self.user:
-            self.stack.setCurrentWidget(self.rooms_page)
 
 
 def main():

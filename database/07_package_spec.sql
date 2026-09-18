@@ -2,10 +2,12 @@ create or replace package monopoly as
    c_start_fund constant number := 1200;
    c_start_bonus constant number := 100;
    c_timeout_penalty constant number := 50;
+   c_disconnect_seconds constant number := 60;
    c_turn_minutes constant number := 2;
    c_auction_seconds constant number := 30;
    c_ready_seconds constant number := 10;
    c_mortgage_interest constant number := 0.10;
+   procedure heartbeat(p_participant_id number);
    procedure register_user (
       p_login    in varchar2,
       p_password in varchar2

@@ -37,6 +37,7 @@ CREATE TABLE "УЧАСТНИКИ" (
  "ID_ИГРЫ" NUMBER NOT NULL,"ID_ПОЛЬЗОВАТЕЛЯ" NUMBER NOT NULL,"ID_ПОЗИЦИИ" NUMBER NOT NULL,
  "БАЛАНС" NUMBER NOT NULL,"ОЧЕРЕДЬ_ХОДА" NUMBER(1),"КОД_СТАТУСА_УЧАСТНИКА" VARCHAR2(40 CHAR) NOT NULL,
  "ГОТОВ" NUMBER(1) DEFAULT 0 NOT NULL,"КОЛ_ТАЙМАУТОВ" NUMBER(1) DEFAULT 0 NOT NULL,
+ "ПОСЛЕДНЯЯ_СВЯЗЬ" DATE DEFAULT SYSDATE NOT NULL,
  CONSTRAINT "FK_УЧ_ИГРА" FOREIGN KEY ("ID_ИГРЫ") REFERENCES "ИГРЫ"("ID_ИГРЫ"),
  CONSTRAINT "FK_УЧ_ПОЛЬЗ" FOREIGN KEY ("ID_ПОЛЬЗОВАТЕЛЯ") REFERENCES "ПОЛЬЗОВАТЕЛИ"("ID_ПОЛЬЗОВАТЕЛЯ"),
  CONSTRAINT "FK_УЧ_ПОЗ" FOREIGN KEY ("ID_ПОЗИЦИИ") REFERENCES "КЛЕТКИ"("ID_КЛЕТКИ"),

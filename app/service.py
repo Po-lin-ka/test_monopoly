@@ -35,11 +35,13 @@ class GameService:
             self.db.connection.commit()
             return result
         except oracledb.Error as exc:
-            self.db.connection.rollback()
-            raise DatabaseError(self.db.message(exc)) from exc
+            error = self.db.error(exc)
+            self.db.rollback_safely()
+            raise error from exc
         finally:
             for ref in outputs:
-                ref.close()
+                self.db.safe_close(ref)
+    def heartbeat(self,p): self.db.callproc('monopoly.heartbeat',[p])
     def stats(self,u): return self.db.cursor_function('monopoly.get_player_stats',[u])
     def leaders(self): return self.db.cursor_function('monopoly.get_leaderboard')
     def history(self,u): return self.db.cursor_function('monopoly.get_game_history',[u])

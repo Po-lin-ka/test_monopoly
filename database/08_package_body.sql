@@ -722,7 +722,8 @@ create or replace package body monopoly as
             set "ОЧЕРЕДЬ_ХОДА" = turn_number,
                 "КОД_СТАТУСА_УЧАСТНИКА" = 'АКТИВЕН',
                 "БАЛАНС" = floor(c_start_fund / v_count),
-                "КОЛ_ТАЙМАУТОВ" = 0, "ГОТОВ" = 1
+                "КОЛ_ТАЙМАУТОВ" = 0, "ГОТОВ" = 1,
+                "ПОСЛЕДНЯЯ_СВЯЗЬ" = sysdate
           where "ID_УЧАСТНИКА" = player."ID_УЧАСТНИКА";
       end loop;
       insert into "ВЛАДЕНИЯ" (
@@ -2490,6 +2491,43 @@ create or replace package body monopoly as
       return v_result;
    end;
 
+   -- Вызывается клиентом только для собственного участника.
+   -- Блокировка игры сериализует heartbeat, выход и определение победителя.
+   procedure heartbeat(p_participant_id number) is
+      v_game_id number;
+      v_status varchar2(40);
+      v_connected number;
+      v_now date := sysdate;
+   begin
+      v_game_id := lock_participant_game(p_participant_id);
+      v_now := sysdate;
+      select "КОД_СТАТУСА_ИГРЫ" into v_status
+        from "ИГРЫ" where "ID_ИГРЫ" = v_game_id;
+      if v_status = 'АКТИВНА' then
+         select count(*) into v_connected from "УЧАСТНИКИ"
+          where "ID_ИГРЫ" = v_game_id
+            and "КОД_СТАТУСА_УЧАСТНИКА" = 'АКТИВЕН'
+            and "ПОСЛЕДНЯЯ_СВЯЗЬ" > v_now - c_disconnect_seconds / 86400;
+         -- Если отсутствовали все, нельзя объявлять последнего в цикле победителем.
+         if v_connected = 0 then
+            finish_game(v_game_id, null);
+         end if;
+         for player in (
+            select "ID_УЧАСТНИКА" from "УЧАСТНИКИ"
+             where "ID_ИГРЫ" = v_game_id
+               and "КОД_СТАТУСА_УЧАСТНИКА" = 'АКТИВЕН'
+               and "ПОСЛЕДНЯЯ_СВЯЗЬ" <= v_now - c_disconnect_seconds / 86400
+             order by "ID_УЧАСТНИКА"
+         ) loop
+            disconnect_player(player."ID_УЧАСТНИКА");
+         end loop;
+      end if;
+      -- Проверяем истечение срока ДО обновления: исключённый не воскресает.
+      update "УЧАСТНИКИ" set "ПОСЛЕДНЯЯ_СВЯЗЬ" = v_now
+       where "ID_УЧАСТНИКА" = p_participant_id
+         and "КОД_СТАТУСА_УЧАСТНИКА" in ('В_ЛОББИ', 'АКТИВЕН', 'БАНКРОТ');
+   end;
+
    procedure get_game_snapshot (
       p_participant_id  number,
       p_last_action_id  number,
@@ -2504,6 +2542,7 @@ create or replace package body monopoly as
       v_game_id number;
    begin
       v_game_id := participant_game(p_participant_id);
+      heartbeat(p_participant_id);
       check_game_timer(v_game_id);
       p_state := get_game_state(p_participant_id);
       p_players := get_game_participants(p_participant_id);
