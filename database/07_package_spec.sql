@@ -44,9 +44,6 @@ create or replace package monopoly as
    function get_game_participants (
       p_participant_id in number
    ) return sys_refcursor;
-   function get_board_state (
-      p_participant_id in number
-   ) return sys_refcursor;
    function get_player_properties (
       p_participant_id in number
    ) return sys_refcursor;

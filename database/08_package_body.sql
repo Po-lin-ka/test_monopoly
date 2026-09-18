@@ -1,5 +1,4 @@
 create or replace package body monopoly as
-   c_bankruptcy_voluntary constant varchar2(100) := 'ДОБРОВОЛЬНО';
    c_bankruptcy_debt_timeout constant varchar2(100) := 'ИСТЕКЛО_ВРЕМЯ_ПОКРЫТИЯ_ДОЛГА';
    c_bankruptcy_second_timeout constant varchar2(100) := 'ПОВТОРНЫЙ_ТАЙМ_АУТ';
    procedure add_action (
@@ -115,6 +114,25 @@ create or replace package body monopoly as
       return v_game_id;
    end;
 
+   -- Вызывается после блокировки игры, до любых изменений команды.
+   -- Штраф и переход хода выполняет snapshot отдельной транзакцией.
+   procedure require_turn_time(p_game_id number) is
+      v_game_status varchar2(40);
+      v_turn_state varchar2(40);
+      v_started date;
+   begin
+      select "КОД_СТАТУСА_ИГРЫ", "КОД_СОСТОЯНИЯ_ХОДА", "ВРЕМЯ_НАЧАЛА_ХОДА"
+        into v_game_status, v_turn_state, v_started
+        from "ИГРЫ" where "ID_ИГРЫ" = p_game_id;
+      if v_game_status = 'АКТИВНА'
+         and v_turn_state in ('ОЖИДАНИЕ_БРОСКА', 'ОЖИДАНИЕ_ПОКУПКИ',
+                              'ОЖИДАНИЕ_УЛУЧШЕНИЯ', 'ЗАВЕРШЕНИЕ_ХОДА',
+                              'ПОКРЫТИЕ_ДОЛГА')
+         and sysdate >= v_started + c_turn_minutes / 1440 then
+         raise_application_error(-20125, 'Время хода истекло. Обновите состояние игры');
+      end if;
+   end;
+
    function require_current_player(p_participant_id number) return number is
       v_game_id number;
       v_count number;
@@ -130,6 +148,7 @@ create or replace package body monopoly as
       if v_count = 0 then
          raise_application_error(-20124, 'Действие доступно только текущему активному игроку');
       end if;
+      require_turn_time(v_game_id);
       return v_game_id;
    end;
 
@@ -226,8 +245,7 @@ create or replace package body monopoly as
    ) is
       password_hash "ПОЛЬЗОВАТЕЛИ"."ПАРОЛЬ_ХЭШ"%type;
    begin
-      if trim(p_login) is
-      null
+      if trim(p_login) is null
       or p_password is null then
          raise_application_error(-20010, 'Логин и пароль обязательны');
       end if;
@@ -289,8 +307,7 @@ create or replace package body monopoly as
       or p_max_players not between 2 and 4 then
          raise_application_error(-20020, 'Количество игроков: 2–4');
       end if;
-      if trim(p_game_name) is
-      null then
+      if trim(p_game_name) is null then
          raise_application_error(-20021, 'Название обязательно');
       end if;
       select count(*)
@@ -514,7 +531,7 @@ create or replace package body monopoly as
          v_status
         from "ИГРЫ"
        where "ID_ИГРЫ" = p_game_id;
-      if v_host_user_id <> p_user_id
+      if p_user_id is null or v_host_user_id <> p_user_id
       or v_status not in ( 'ОЖИДАНИЕ',
                      'ПРОВЕРКА_ГОТОВНОСТИ' ) then
          raise_application_error(-20040, 'Нельзя забросить игру');
@@ -843,66 +860,6 @@ create or replace package body monopoly as
                             u."ID_УЧАСТНИКА";
       return v_result;
    end;
-   function get_board_state (
-      p_participant_id number
-   ) return sys_refcursor is
-      v_result sys_refcursor;
-      v_game_id number;
-   begin
-      v_game_id := participant_game(p_participant_id);
-      open v_result for select c."ID_КЛЕТКИ",
-                         c."ПОЗИЦИЯ",
-                         c."НАЗВАНИЕ",
-                         c."ТИП",
-                         c."ЦВЕТОВАЯ_ГРУППА",
-                         c."ЦЕНА_ПОКУПКИ",
-                         c."ЦЕНА_ПОКУПКИ" "БАЗОВАЯ_РЕНТА",
-                         ceil(c."ЦЕНА_ПОКУПКИ" * 1.25) "РЕНТА_1_ДОМ",
-                         ceil(c."ЦЕНА_ПОКУПКИ" * 1.50) "РЕНТА_2_ДОМА",
-                         ceil(c."ЦЕНА_ПОКУПКИ" * 1.75) "РЕНТА_ОТЕЛЬ",
-                         ceil(c."ЦЕНА_ПОКУПКИ" * 0.25) "ЦЕНА_ДОМА",
-                         case
-                            when c."ТИП" = 'Старт' then
-                                    c_start_bonus
-                         end "БОНУС_СТАРТА",
-                         v."ID_ВЛАДЕНИЯ",
-                         v."ID_ВЛАДЕЛЬЦА",
-                         op."ЛОГИН" "ВЛАДЕЛЕЦ",
-                         v."КОЛВО_ДОМОВ",
-                         v."ЗАЛОЖЕНА",
-                         case
-                            when c."ТИП" = 'Улица'
-                                    and v."ID_ВЛАДЕЛЬЦА" is not null
-                                    and (
-                                    select count(*)
-                                      from "ВЛАДЕНИЯ" vx
-                                      join "КЛЕТКИ" cx
-                                    on cx."ID_КЛЕТКИ" = vx."ID_КЛЕТКИ"
-                                     where vx."ID_ИГРЫ" = v_game_id
-                                       and vx."ID_ВЛАДЕЛЬЦА" = v."ID_ВЛАДЕЛЬЦА"
-                                       and vx."ЗАЛОЖЕНА" = 0
-                                       and cx."ЦВЕТОВАЯ_ГРУППА" = c."ЦВЕТОВАЯ_ГРУППА"
-                                 ) = (
-                                    select count(*)
-                                      from "КЛЕТКИ" cg
-                                     where cg."ТИП" = 'Улица'
-                                       and cg."ЦВЕТОВАЯ_ГРУППА" = c."ЦВЕТОВАЯ_ГРУППА"
-                                 ) then
-                                    2
-                            else
-                               1
-                         end "МНОЖИТЕЛЬ_ГРУППЫ"
-                                from "КЛЕТКИ" c
-                                left join "ВЛАДЕНИЯ" v
-                              on v."ID_КЛЕТКИ" = c."ID_КЛЕТКИ"
-                                 and v."ID_ИГРЫ" = v_game_id
-                                left join "УЧАСТНИКИ" ou
-                              on ou."ID_УЧАСТНИКА" = v."ID_ВЛАДЕЛЬЦА"
-                                left join "ПОЛЬЗОВАТЕЛИ" op
-                              on op."ID_ПОЛЬЗОВАТЕЛЯ" = ou."ID_ПОЛЬЗОВАТЕЛЯ"
-                   order by c."ПОЗИЦИЯ";
-      return v_result;
-   end;
    function get_player_properties (
       p_participant_id number
    ) return sys_refcursor is
@@ -1052,20 +1009,17 @@ create or replace package body monopoly as
       v_game_id number;
       v_cell_id number;
       v_cell_type varchar2(30);
-      v_color_group varchar2(20);
       v_owner_id number;
       v_mortgaged number;
       v_level number;
    begin
       select u."ID_ИГРЫ",
              u."ID_ПОЗИЦИИ",
-             c."ТИП",
-             c."ЦВЕТОВАЯ_ГРУППА"
+             c."ТИП"
         into
          v_game_id,
          v_cell_id,
-         v_cell_type,
-         v_color_group
+         v_cell_type
         from "УЧАСТНИКИ" u
         join "КЛЕТКИ" c
       on c."ID_КЛЕТКИ" = u."ID_ПОЗИЦИИ"
@@ -1096,8 +1050,7 @@ create or replace package body monopoly as
                set
                "КОД_СОСТОЯНИЯ_ХОДА" = 'ОЖИДАНИЕ_ПОКУПКИ'
              where "ID_ИГРЫ" = v_game_id;
-         elsif v_owner_id is null
-      or v_owner_id <> p_participant_id then
+         elsif v_owner_id <> p_participant_id then
             if v_mortgaged = 1 then
                update "ИГРЫ"
                   set
@@ -1184,6 +1137,7 @@ create or replace package body monopoly as
       v_status varchar2(40);
    begin
       lock_game(p_game_id);
+      require_turn_time(p_game_id);
       select "КОД_СОСТОЯНИЯ_ХОДА",
              "ID_ТЕКУЩЕГО_УЧАСТНИКА"
         into
@@ -1320,10 +1274,10 @@ create or replace package body monopoly as
    function calculate_rent (
       p_ownership_id number,
       p_dice         number
-   ) return number is      v_cell_type    varchar2(30);
+   ) return number is
+      v_cell_type    varchar2(30);
       v_color_group varchar2(20);
       v_mortgaged number;
-      v_level number;
       rent number;
       v_owner_id number;
       v_game_id number;
@@ -1333,7 +1287,6 @@ create or replace package body monopoly as
       select c."ТИП",
              c."ЦВЕТОВАЯ_ГРУППА",
              v."ЗАЛОЖЕНА",
-             v."КОЛВО_ДОМОВ",
              v."ID_ВЛАДЕЛЬЦА",
              v."ID_ИГРЫ",
              ceil(c."ЦЕНА_ПОКУПКИ" *(1 + v."КОЛВО_ДОМОВ" * 0.25))
@@ -1341,7 +1294,6 @@ create or replace package body monopoly as
          v_cell_type,
          v_color_group,
          v_mortgaged,
-         v_level,
          v_owner_id,
          v_game_id,
          rent
@@ -1456,7 +1408,6 @@ create or replace package body monopoly as
       p_dice           number
    ) is
       v_game_id number;
-      v_card_id number;
       target number;
       v_cell_type         "КАРТЫ_ШАНСА"."ТИП_ЭФФЕКТА"%type;
       v_card_amount number;
@@ -1471,20 +1422,17 @@ create or replace package body monopoly as
         into chance_cell
         from "УЧАСТНИКИ"
        where "ID_УЧАСТНИКА" = p_participant_id;
-      select "ID_КАРТЫ",
-             "ID_ЦЕЛЕВОЙ_КЛЕТКИ",
+      select "ID_ЦЕЛЕВОЙ_КЛЕТКИ",
              "ТИП_ЭФФЕКТА",
              "СУММА_ИЗМЕНЕНИЯ",
              "ТЕКСТ_СОБЫТИЯ"
         into
-         v_card_id,
          target,
          v_cell_type,
          v_card_amount,
          v_card_text
         from (
-         select "ID_КАРТЫ",
-                "ID_ЦЕЛЕВОЙ_КЛЕТКИ",
+         select "ID_ЦЕЛЕВОЙ_КЛЕТКИ",
                 "ТИП_ЭФФЕКТА",
                 "СУММА_ИЗМЕНЕНИЯ",
                 "ТЕКСТ_СОБЫТИЯ"
@@ -1982,8 +1930,8 @@ create or replace package body monopoly as
       if sysdate >= started + c_auction_seconds / 86400 then
          raise_application_error(-20094, 'Время истекло');
       end if;
-      if p_amount is null then
-         raise_application_error(-20095, 'Укажите сумму ставки');
+      if p_amount is null or p_amount <> trunc(p_amount) then
+         raise_application_error(-20095, 'Укажите целую сумму ставки');
       end if;
       if
          p_amount <> 0
@@ -2311,11 +2259,9 @@ create or replace package body monopoly as
       v_game_id number;
       v_balance number;
       v_current_player_id number;
-      avail number;
       v_game_status varchar2(40);
    begin
-      if p_reason is null or p_reason not in ( c_bankruptcy_voluntary,
-                           c_bankruptcy_debt_timeout,
+      if p_reason is null or p_reason not in ( c_bankruptcy_debt_timeout,
                            c_bankruptcy_second_timeout ) then
          raise_application_error(-20101, 'Неизвестная причина');
       end if;
@@ -2330,21 +2276,6 @@ create or replace package body monopoly as
         join "ИГРЫ" x
       on x."ID_ИГРЫ" = u."ID_ИГРЫ"
        where u."ID_УЧАСТНИКА" = p_participant_id;
-      if p_reason = c_bankruptcy_voluntary then
-         if v_balance >= 0 then
-            raise_application_error(-20102, 'Нет долга');
-         end if;
-         select count(*)
-           into avail
-           from "ВЛАДЕНИЯ"
-          where "ID_ВЛАДЕЛЬЦА" = p_participant_id
-            and ( "КОЛВО_ДОМОВ" > 0
-             or ( "ЗАЛОЖЕНА" = 0
-            and "КОЛВО_ДОМОВ" = 0 ) );
-         if avail > 0 then
-            raise_application_error(-20103, 'Осталось доступное имущество');
-         end if;
-      end if;
       update "УЧАСТНИКИ"
          set
          "КОД_СТАТУСА_УЧАСТНИКА" = 'БАНКРОТ'
@@ -2373,22 +2304,12 @@ create or replace package body monopoly as
       p_participant_id number
    ) is
       v_game_id number;
-      v_current_player_id number;
       v_game_status varchar2(40);
       v_count number;
    begin
       v_game_id := lock_participant_game(p_participant_id);
-      select u."ID_ИГРЫ",
-             x."ID_ТЕКУЩЕГО_УЧАСТНИКА",
-             x."КОД_СТАТУСА_ИГРЫ"
-        into
-         v_game_id,
-         v_current_player_id,
-         v_game_status
-        from "УЧАСТНИКИ" u
-        join "ИГРЫ" x
-      on x."ID_ИГРЫ" = u."ID_ИГРЫ"
-       where u."ID_УЧАСТНИКА" = p_participant_id;
+      select "КОД_СТАТУСА_ИГРЫ" into v_game_status
+        from "ИГРЫ" where "ID_ИГРЫ" = v_game_id;
       if v_game_status <> 'АКТИВНА' then
          raise_application_error(-20104, 'Игра не активна');
       end if;
@@ -2422,15 +2343,15 @@ create or replace package body monopoly as
         join "ИГРЫ" x
       on x."ID_ИГРЫ" = u."ID_ИГРЫ"
        where u."ID_УЧАСТНИКА" = p_participant_id;
-      if v_game_status <> 'АКТИВНА' then
-         return;
-      end if;
       update "УЧАСТНИКИ"
          set
-         "КОД_СТАТУСА_УЧАСТНИКА" = 'БАНКРОТ'
+         "КОД_СТАТУСА_УЧАСТНИКА" = 'ПОКИНУЛ'
        where "ID_УЧАСТНИКА" = p_participant_id
-         and "КОД_СТАТУСА_УЧАСТНИКА" = 'АКТИВЕН';
+         and "КОД_СТАТУСА_УЧАСТНИКА" in ('АКТИВЕН', 'БАНКРОТ');
       if sql%rowcount = 0 then
+         return;
+      end if;
+      if v_game_status <> 'АКТИВНА' then
          return;
       end if;
       return_properties_to_bank(p_participant_id);
@@ -2475,8 +2396,7 @@ create or replace package body monopoly as
       gs varchar2(40);
    begin
       v_game_id := lock_participant_game(p_participant_id);
-      if trim(p_text) is
-      null then
+      if trim(p_text) is null then
          raise_application_error(-20110, 'Пустое сообщение');
       end if;
       select u."КОД_СТАТУСА_УЧАСТНИКА",
@@ -2489,7 +2409,7 @@ create or replace package body monopoly as
       on games."ID_ИГРЫ" = u."ID_ИГРЫ"
        where u."ID_УЧАСТНИКА" = p_participant_id;
       if v_player_status not in ( 'В_ЛОББИ',
-                     'АКТИВЕН' )
+                     'АКТИВЕН', 'БАНКРОТ' )
       or gs = 'ЗАБРОШЕНА' then
          raise_application_error(-20111, 'Чат недоступен');
       end if;
@@ -2517,7 +2437,7 @@ create or replace package body monopoly as
         from "УЧАСТНИКИ"
        where "ID_УЧАСТНИКА" = p_participant_id;
       if v_player_status not in ( 'В_ЛОББИ',
-                     'АКТИВЕН' ) then
+                     'АКТИВЕН', 'БАНКРОТ' ) then
          raise_application_error(-20112, 'Чат недоступен');
       end if;
       open v_result for select c."ID_СООБЩЕНИЯ",
@@ -2679,6 +2599,9 @@ create or replace package body monopoly as
                                       join "ПОЛЬЗОВАТЕЛИ" p
                                     on p."ID_ПОЛЬЗОВАТЕЛЯ" = u."ID_ПОЛЬЗОВАТЕЛЯ"
                       where u."ID_ИГРЫ" = v_game_id
+                        and exists (select 1 from "УЧАСТНИКИ" reader
+                                     where reader."ID_УЧАСТНИКА" = p_participant_id
+                                       and reader."КОД_СТАТУСА_УЧАСТНИКА" in ('В_ЛОББИ', 'АКТИВЕН', 'БАНКРОТ'))
                         and ch."ID_СООБЩЕНИЯ" > nvl(
                         p_last_message_id,
                         0

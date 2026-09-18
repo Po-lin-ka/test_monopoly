@@ -1,5 +1,7 @@
 # Развёртывание Monopoly на Windows с минимальным расходом диска
 
+Для запуска на вузовских удалённых рабочих столах с общей Oracle см. [UNIVERSITY_DEPLOYMENT.md](UNIVERSITY_DEPLOYMENT.md).
+
 Эта инструкция разворачивает на одном компьютере:
 
 - Oracle AI Database Free Lite в Docker;

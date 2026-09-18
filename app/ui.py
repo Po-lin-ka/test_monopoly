@@ -533,15 +533,15 @@ class StatsDialog(QDialog):
 class MortgageDialog(QDialog):
     def __init__(self, properties, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Залог собственности для погашения долга")
+        self.setWindowTitle("Покрытие долга")
         self.setMinimumWidth(680)
         self.checkboxes = []
         layout = QVBoxLayout(self)
-        title = QLabel("Выберите объекты для залога")
+        title = QLabel("Выберите объекты для покрытия долга")
         title.setObjectName("roomTitle")
         hint = QLabel(
             "Заложить можно только объект без построек, который ещё не заложен. "
-            "Отметьте несколько объектов — итоговая сумма рассчитана автоматически."
+            "Для объекта с постройками продаётся один уровень. Отметьте несколько объектов — итоговая сумма рассчитана автоматически."
         )
         hint.setWordWrap(True)
         layout.addWidget(title)
@@ -573,7 +573,7 @@ class MortgageDialog(QDialog):
         self.total_label = QLabel("Игрок получит: 0 ₽")
         self.total_label.setStyleSheet("font-size:20px; font-weight:800; color:#166534;")
         controls = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        controls.button(QDialogButtonBox.Ok).setText("Заложить выбранное")
+        controls.button(QDialogButtonBox.Ok).setText("Применить выбранное")
         controls.button(QDialogButtonBox.Ok).setEnabled(False)
         controls.accepted.connect(self.accept)
         controls.rejected.connect(self.reject)
@@ -842,7 +842,7 @@ class Window(QMainWindow):
         self.finish_details.setAlignment(Qt.AlignCenter)
         self.finish_details.setObjectName("subtitle")
         self.finish_details.setWordWrap(True)
-        exit_button = button("Выйти из завершённой игры", self.return_to_rooms, "primary")
+        exit_button = button("Выйти из завершённой игры", self.leave, "primary")
         card_layout.addWidget(trophy)
         card_layout.addWidget(self.winner_label)
         card_layout.addWidget(self.finish_details)
@@ -889,7 +889,7 @@ class Window(QMainWindow):
     def act(self, operation):
         try:
             operation()
-            self.poll(True)
+            self.poll()
         except (DatabaseError, RuntimeError) as exc:
             self.alert(str(exc), True)
 
@@ -916,6 +916,8 @@ class Window(QMainWindow):
                     self.s.leave_lobby(self.part)
                 elif status == "АКТИВНА":
                     self.s.leave_game(self.part)
+                elif status == "ЗАВЕРШЕНА":
+                    self.s.disconnect(self.part)
         except DatabaseError as exc:
             self.alert(str(exc), True)
             return
@@ -998,7 +1000,7 @@ class Window(QMainWindow):
         self.stack.setCurrentWidget(self.lobby_page)
         self.lobby_title.setText("Подключение к комнате…")
         self.lobby_info.setText("Загружаем участников")
-        self.poll(True)
+        self.poll()
 
     def toggle_ready(self):
         ready = bool(
@@ -1010,7 +1012,7 @@ class Window(QMainWindow):
         )
         self.act(lambda: self.s.ready(self.part, 0 if ready else 1))
 
-    def poll(self, force=False):
+    def poll(self):
         self.poll_count += 1
         if self.stack.currentWidget() is self.rooms_page:
             if self.poll_count % 5 == 0:
@@ -1395,7 +1397,7 @@ class Window(QMainWindow):
         try:
             self.board.set_center_event(None)
             dice = self.s.roll(self.part)
-            self.poll(True)
+            self.poll()
         except DatabaseError as exc:
             self.alert(str(exc), True)
 
@@ -1478,6 +1480,8 @@ class Window(QMainWindow):
                 self.s.leave_lobby(self.part)
             elif status == "АКТИВНА":
                 self.s.leave_game(self.part)
+            elif status == "ЗАВЕРШЕНА":
+                self.s.disconnect(self.part)
             self.return_to_rooms()
         except DatabaseError as exc:
             self.alert(str(exc), True)
@@ -1486,7 +1490,7 @@ class Window(QMainWindow):
         answer = QMessageBox.question(
             self,
             "Покинуть игру?",
-            "Вы станете банкротом, а вся собственность вернётся банку. Продолжить?",
+            "Вы покинете игру, потеряете доступ к чату, а вся собственность вернётся банку. Продолжить?",
             QMessageBox.Ok | QMessageBox.Cancel,
             QMessageBox.Cancel,
         )
@@ -1535,7 +1539,7 @@ class Window(QMainWindow):
         self.disconnected = True
         try:
             status = self.state_row.get("код_статуса_игры")
-            if status == "АКТИВНА" and hasattr(self.s, "disconnect"):
+            if status in ("АКТИВНА", "ЗАВЕРШЕНА") and hasattr(self.s, "disconnect"):
                 self.s.disconnect(self.part)
             elif status in ("ОЖИДАНИЕ", "ПРОВЕРКА_ГОТОВНОСТИ"):
                 self.s.leave_lobby(self.part)
