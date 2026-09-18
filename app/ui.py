@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import re
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
@@ -107,6 +108,22 @@ QTableWidget::item { padding: 9px; }
 QTableWidget::item:selected { background: #bfdbfe; color: #172554; }
 QHeaderView::section { background: #e8eef8; color: #334155; border: 0; border-bottom: 1px solid #cbd5e1; padding: 10px; font-weight: 700; }
 """
+
+MORTGAGE_CHECKBOX_STYLE = """
+QCheckBox { spacing: 12px; padding: 8px; color: #172033; }
+QCheckBox:disabled { color: #64748b; }
+QCheckBox::indicator {
+    width: 24px; height: 24px; border: 2px solid #64748b;
+    border-radius: 5px; background: white;
+}
+QCheckBox::indicator:unchecked:hover { border-color: #2563eb; background: #eff6ff; }
+QCheckBox::indicator:checked {
+    border-color: #1d4ed8; background: #2563eb;
+    image: url("CHECKMARK_PATH");
+}
+QCheckBox::indicator:focus { border-color: #172554; }
+QCheckBox::indicator:disabled { border-color: #94a3b8; background: #e2e8f0; }
+""".replace("CHECKMARK_PATH", (Path(__file__).resolve().parent / "assets" / "checkmark.svg").as_posix())
 
 
 def button(text, slot, kind=None):
@@ -534,6 +551,7 @@ class MortgageDialog(QDialog):
     def __init__(self, properties, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Покрытие долга")
+        self.setStyleSheet(MORTGAGE_CHECKBOX_STYLE)
         self.setMinimumWidth(680)
         self.checkboxes = []
         layout = QVBoxLayout(self)
