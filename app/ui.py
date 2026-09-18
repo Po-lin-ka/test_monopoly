@@ -5,7 +5,7 @@ import re
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QLibraryInfo, QPointF, QRectF, Qt, QTimer, QTranslator
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QFrame,
@@ -1664,6 +1664,10 @@ class Window(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    # Стандартные диалоги тоже должны быть русскими при любом языке системы.
+    translator = QTranslator(app)
+    translator.load("qtbase_ru", QLibraryInfo.path(QLibraryInfo.TranslationsPath))
+    app.installTranslator(translator)
     try:
         print(f"Запущена Monopoly Lite, версия интерфейса {APP_VERSION}")
         window = Window()
