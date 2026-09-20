@@ -7,7 +7,6 @@ from app.db import Database
 
 ROOT = Path(__file__).resolve().parent
 SOURCES = (
-    "01_drop_objects.sql",
     "02_create_tables.sql",
     "03_insert_dictionaries.sql",
     "04_insert_cells.sql",

@@ -2,7 +2,6 @@ SET DEFINE OFF
 SET SERVEROUTPUT ON
 WHENEVER SQLERROR EXIT SQL.SQLCODE
 
-@01_drop_objects.sql
 @02_create_tables.sql
 @03_insert_dictionaries.sql
 @04_insert_cells.sql
