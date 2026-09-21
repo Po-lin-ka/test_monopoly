@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from PySide2.QtCore import QThread, Signal
+from PyQt5.QtCore import QThread, pyqtSignal
 
 from .db import Database
 from .service import GameService
 
 
 class SnapshotThread(QThread):
-    completed = Signal(object)
-    failed = Signal(object)
+    completed = pyqtSignal(object)
+    failed = pyqtSignal(object)
 
     def __init__(
         self,

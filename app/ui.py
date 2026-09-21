@@ -5,9 +5,9 @@ import re
 import sys
 from pathlib import Path
 
-from PySide2.QtCore import QLibraryInfo, QPointF, QRectF, Qt, QTimer, QTranslator
-from PySide2.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
-from PySide2.QtWidgets import (
+from PyQt5.QtCore import QLibraryInfo, QPointF, QRectF, Qt, QTimer, QTranslator
+from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
+from PyQt5.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow,
     QMessageBox, QPushButton, QSpinBox, QStackedWidget, QTabWidget, QTableWidget,
@@ -19,7 +19,7 @@ from .db import ConnectionLost, Database, DatabaseError
 from .service import GameService
 from .snapshot import ReconnectThread, SnapshotThread
 
-APP_VERSION = "2026.09.21-16"
+APP_VERSION = "2026.09.21-17"
 
 
 RULES_TEXT = """

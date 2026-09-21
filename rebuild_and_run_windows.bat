@@ -2,10 +2,10 @@
 setlocal
 cd /d "%~dp0"
 
-py -3.10 --version >nul 2>&1
+py -3.12 --version >nul 2>&1
 if errorlevel 1 (
-    echo Python 3.10 was not found.
-    echo Install 64-bit Python 3.10, then run this file again.
+    echo Python 3.12 was not found.
+    echo Install 64-bit Python 3.12, then run this file again.
     pause
     exit /b 1
 )
@@ -20,8 +20,8 @@ if exist ".venv" (
     )
 )
 
-echo [2/5] Creating a fresh Python 3.10 virtual environment...
-py -3.10 -m venv .venv
+echo [2/5] Creating a fresh Python 3.12 virtual environment...
+py -3.12 -m venv .venv
 if errorlevel 1 goto :error
 
 echo [3/5] Updating pip...
@@ -32,7 +32,7 @@ if errorlevel 1 goto :error
 echo [4/5] Installing dependencies...
 python -m pip install -r requirements.txt
 if errorlevel 1 goto :error
-python -c "from PySide2.QtCore import qVersion; print('Qt', qVersion(), 'loaded successfully')"
+python -c "from PyQt5.QtCore import qVersion; print('Qt', qVersion(), 'loaded successfully')"
 if errorlevel 1 goto :error
 
 if not exist ".env" (
