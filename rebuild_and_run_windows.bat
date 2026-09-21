@@ -2,6 +2,14 @@
 setlocal
 cd /d "%~dp0"
 
+py -3.10 --version >nul 2>&1
+if errorlevel 1 (
+    echo Python 3.10 was not found.
+    echo Install 64-bit Python 3.10, then run this file again.
+    pause
+    exit /b 1
+)
+
 echo [1/5] Closing old virtual environment...
 if exist ".venv" (
     rmdir /s /q ".venv"
@@ -12,8 +20,8 @@ if exist ".venv" (
     )
 )
 
-echo [2/5] Creating a fresh virtual environment...
-py -3 -m venv .venv
+echo [2/5] Creating a fresh Python 3.10 virtual environment...
+py -3.10 -m venv .venv
 if errorlevel 1 goto :error
 
 echo [3/5] Updating pip...
@@ -24,13 +32,15 @@ if errorlevel 1 goto :error
 echo [4/5] Installing dependencies...
 python -m pip install -r requirements.txt
 if errorlevel 1 goto :error
+python -c "from PySide2.QtCore import qVersion; print('Qt', qVersion(), 'loaded successfully')"
+if errorlevel 1 goto :error
 
 if not exist ".env" (
     copy ".env.example" ".env" >nul
     echo Created .env from .env.example. Check Oracle settings if the database is on another PC.
 )
 
-echo [5/5] Starting Monopoly Lite...
+echo [5/5] Starting Monopoly...
 python -m app.main
 exit /b %errorlevel%
 

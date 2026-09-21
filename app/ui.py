@@ -5,9 +5,9 @@ import re
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QLibraryInfo, QPointF, QRectF, Qt, QTimer, QTranslator
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
-from PySide6.QtWidgets import (
+from PySide2.QtCore import QLibraryInfo, QPointF, QRectF, Qt, QTimer, QTranslator
+from PySide2.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
+from PySide2.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow,
     QMessageBox, QPushButton, QSpinBox, QStackedWidget, QTabWidget, QTableWidget,
@@ -19,7 +19,8 @@ from .db import ConnectionLost, Database, DatabaseError
 from .service import GameService
 from .snapshot import ReconnectThread, SnapshotThread
 
-APP_VERSION = "2026.09.18-15"
+APP_VERSION = "2026.09.21-16"
+
 
 RULES_TEXT = """
 Цель игры
@@ -634,7 +635,7 @@ class Window(QMainWindow):
         super().__init__()
         self.resize(1760, 1060)
         self.setMinimumSize(1280, 800)
-        self.setWindowTitle(f"Monopoly Lite · версия {APP_VERSION}")
+        self.setWindowTitle(f"Монополия · версия {APP_VERSION}")
         self.setStyleSheet(STYLE)
         self.db = Database()
         self.s = GameService(self.db)
@@ -693,7 +694,7 @@ class Window(QMainWindow):
         card.setMaximumWidth(480)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(42, 36, 42, 36)
-        title, subtitle = self.page_header("Monopoly Lite", "Войдите или создайте новый аккаунт")
+        title, subtitle = self.page_header("Монополия", "Войдите или создайте новый аккаунт")
         self.le = QLineEdit()
         self.le.setPlaceholderText("Логин")
         self.pe = QLineEdit()
@@ -880,7 +881,7 @@ class Window(QMainWindow):
 
     def alert(self, text, error=False):
         if not error:
-            QMessageBox.information(self, "Monopoly", text)
+            QMessageBox.information(self, "Монополия", text)
             return
         clean = str(text).split("ORA-06512")[0].strip()
         clean = re.sub(r"ORA-\d+:\s*", "", clean).strip()
@@ -890,11 +891,11 @@ class Window(QMainWindow):
         box.setText("Не удалось выполнить действие")
         box.setInformativeText(clean)
         box.setStandardButtons(QMessageBox.Ok)
-        box.exec()
+        box.exec_()
 
     def show_rules(self):
         dialog = QDialog(self)
-        dialog.setWindowTitle("Правила Monopoly Lite")
+        dialog.setWindowTitle("Правила Монополии")
         dialog.resize(720, 680)
         layout = QVBoxLayout(dialog)
         title = QLabel("Правила игры")
@@ -906,7 +907,7 @@ class Window(QMainWindow):
         layout.addWidget(title)
         layout.addWidget(rules)
         layout.addWidget(button("Закрыть", dialog.accept, "primary"), alignment=Qt.AlignRight)
-        dialog.exec()
+        dialog.exec_()
 
     def act(self, operation):
         if self.connection_lost or self.closing:
@@ -1036,7 +1037,7 @@ class Window(QMainWindow):
 
     def create(self):
         dialog = CreateDialog(self)
-        if dialog.exec() != QDialog.Accepted:
+        if dialog.exec_() != QDialog.Accepted:
             return
         try:
             game_id = self.s.create_game(self.user, dialog.name.text(), dialog.player_count(), dialog.password.text())
@@ -1525,7 +1526,7 @@ class Window(QMainWindow):
                     self.alert("У вас нет собственности для погашения долга.")
                     return
                 dialog = MortgageDialog(properties, self)
-                if dialog.exec() == QDialog.Accepted:
+                if dialog.exec_() == QDialog.Accepted:
                     def resolve_debt():
                         self.s.resolve_debt(
                             self.part,
@@ -1625,7 +1626,7 @@ class Window(QMainWindow):
                 self.s.leaders(),
                 self.s.history(self.user),
                 self,
-            ).exec()
+            ).exec_()
         except DatabaseError as exc:
             self.report_error(exc)
 
@@ -1666,13 +1667,13 @@ def main():
     app = QApplication(sys.argv)
     # Стандартные диалоги тоже должны быть русскими при любом языке системы.
     translator = QTranslator(app)
-    translator.load("qtbase_ru", QLibraryInfo.path(QLibraryInfo.TranslationsPath))
+    translator.load("qtbase_ru", QLibraryInfo.location(QLibraryInfo.TranslationsPath))
     app.installTranslator(translator)
     try:
-        print(f"Запущена Monopoly Lite, версия интерфейса {APP_VERSION}")
+        print(f"Запущена Монополия, версия интерфейса {APP_VERSION}")
         window = Window()
         window.showMaximized()
-        return app.exec()
+        return app.exec_()
     except Exception as exc:
         QMessageBox.critical(None, "Ошибка", str(exc))
         return 1

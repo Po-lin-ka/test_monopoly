@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, Signal
+from PySide2.QtCore import QThread, Signal
 
 from .db import Database
 from .service import GameService
