@@ -1,13 +1,11 @@
 create or replace package body monopoly as
-   c_bankruptcy_debt_timeout constant varchar2(100) := 'ИСТЕКЛО_ВРЕМЯ_ПОКРЫТИЯ_ДОЛГА';
-   c_bankruptcy_second_timeout constant varchar2(100) := 'ПОВТОРНЫЙ_ТАЙМ_АУТ';
    procedure add_action(
       p_game_id number, p_participant_id number default null, p_cell_id number default null,
       p_action_code varchar2, p_amount number default null, p_event_text varchar2 default null
    );
    procedure return_properties_to_bank(p_participant_id number);
    procedure enter_debt_or_bankruptcy(p_participant_id number);
-   procedure start_game(p_game_id number, p_host_user_id number);
+   procedure start_game(p_game_id number);
    procedure process_cell(p_participant_id number, p_dice number);
    procedure advance_to_next_player(p_game_id number);
    function calculate_rent(p_ownership_id number, p_dice number) return number;
@@ -19,7 +17,7 @@ create or replace package body monopoly as
    procedure check_game_timer(p_game_id number);
    procedure finish_game(p_game_id number, p_winner_id number default null);
    procedure finish_or_continue(p_game_id number);
-   procedure declare_bankruptcy(p_participant_id number, p_reason varchar2);
+   procedure declare_bankruptcy(p_participant_id number);
 
    procedure process_properties(
       p_participant_id number, p_mortgage_ids number_list, p_sale_ids number_list,
@@ -38,7 +36,6 @@ create or replace package body monopoly as
          raise_application_error(-20001, 'Участник не найден');
    end;
 
-   -- Все изменения одной партии сначала блокируют её строку.
    procedure lock_game(p_game_id number) is
       v_game_id number;
    begin
@@ -66,8 +63,6 @@ create or replace package body monopoly as
       return v_game_id;
    end;
 
-   -- Вызывается после блокировки игры, до любых изменений команды.
-   -- Штраф и переход хода выполняет snapshot отдельной транзакцией.
    procedure require_turn_time(p_game_id number) is
       v_game_status varchar2(40);
       v_turn_state varchar2(40);
@@ -107,17 +102,7 @@ create or replace package body monopoly as
       p_game_id number, p_participant_id number default null, p_cell_id number default null,
       p_action_code varchar2, p_amount number default null, p_event_text varchar2 default null
    ) is
-      v_count number;
    begin
-      if p_participant_id is not null then
-         select count(*) into v_count
-           from "УЧАСТНИКИ"
-          where "ID_УЧАСТНИКА" = p_participant_id
-            and "ID_ИГРЫ" = p_game_id;
-         if v_count = 0 then
-            raise_application_error(-20002, 'Участник не относится к игре');
-         end if;
-      end if;
       insert into "ЖУРНАЛ_ДЕЙСТВИЙ" (
          "ID_ИГРЫ", "ID_УЧАСТНИКА", "ID_КЛЕТКИ", "КОД_ДЕЙСТВИЯ", "СУММА", "ТЕКСТ_СОБЫТИЯ", "ДАТА_ВРЕМЯ"
       ) values
@@ -151,9 +136,8 @@ create or replace package body monopoly as
        where "ID_ВЛАДЕЛЬЦА" = p_participant_id
          and ("КОЛВО_ДОМОВ" > 0 or ("ЗАЛОЖЕНА" = 0 and "КОЛВО_ДОМОВ" = 0));
       if available = 0 then
-         declare_bankruptcy(p_participant_id, c_bankruptcy_debt_timeout);
+         declare_bankruptcy(p_participant_id);
       else
-         -- По правилам проекта частичное погашение даёт новый срок.
          update "ИГРЫ"
             set "КОД_СОСТОЯНИЯ_ХОДА" = 'ПОКРЫТИЕ_ДОЛГА', "ВРЕМЯ_НАЧАЛА_ХОДА" = sysdate
           where "ID_ИГРЫ" = v_game_id;
@@ -362,8 +346,8 @@ create or replace package body monopoly as
       v_status varchar2(40);
    begin
       v_game_id := lock_participant_game(p_participant_id);
-      select u."ID_ИГРЫ", u."ID_ПОЛЬЗОВАТЕЛЯ", x."ID_ХОСТА", x."КОД_СТАТУСА_ИГРЫ"
-        into v_game_id, v_user_id, v_host_user_id, v_status
+      select u."ID_ПОЛЬЗОВАТЕЛЯ", x."ID_ХОСТА", x."КОД_СТАТУСА_ИГРЫ"
+        into v_user_id, v_host_user_id, v_status
         from "УЧАСТНИКИ" u
         join "ИГРЫ" x
       on x."ID_ИГРЫ" = u."ID_ИГРЫ"
@@ -399,8 +383,8 @@ create or replace package body monopoly as
       if p_ready is null or p_ready not in (0, 1) then
          raise_application_error(-20047, 'Готовность: 0 или 1');
       end if;
-      select u."ID_ИГРЫ", x."КОД_СТАТУСА_ИГРЫ"
-        into v_game_id, v_status
+      select x."КОД_СТАТУСА_ИГРЫ"
+        into v_status
         from "УЧАСТНИКИ" u
         join "ИГРЫ" x
       on x."ID_ИГРЫ" = u."ID_ИГРЫ"
@@ -436,22 +420,12 @@ create or replace package body monopoly as
       end if;
    end;
 
-   procedure start_game(p_game_id number, p_host_user_id number) is
-      v_host_user_id number;
-      v_status varchar2(40);
+   procedure start_game(p_game_id number) is
       v_count number;
       ready number;
       first_id number;
       turn_number number := 0;
    begin
-      select "ID_ХОСТА", "КОД_СТАТУСА_ИГРЫ"
-        into v_host_user_id, v_status
-        from "ИГРЫ"
-       where "ID_ИГРЫ" = p_game_id;
-      if v_host_user_id <> p_host_user_id
-      or v_status <> 'ПРОВЕРКА_ГОТОВНОСТИ' then
-         raise_application_error(-20050, 'Игра не готова');
-      end if;
       select count(*), sum("ГОТОВ")
         into v_count, ready
         from "УЧАСТНИКИ"
@@ -850,23 +824,19 @@ create or replace package body monopoly as
    function calculate_rent(p_ownership_id number, p_dice number) return number is
       v_cell_type varchar2(30);
       v_color_group varchar2(20);
-      v_mortgaged number;
       rent number;
       v_owner_id number;
       v_game_id number;
       v_count number;
       v_group_count number;
    begin
-      select c."ТИП", c."ЦВЕТОВАЯ_ГРУППА", v."ЗАЛОЖЕНА", v."ID_ВЛАДЕЛЬЦА", v."ID_ИГРЫ",
+      select c."ТИП", c."ЦВЕТОВАЯ_ГРУППА", v."ID_ВЛАДЕЛЬЦА", v."ID_ИГРЫ",
              ceil(c."ЦЕНА_ПОКУПКИ" *(1 + v."КОЛВО_ДОМОВ" * 0.25))
-        into v_cell_type, v_color_group, v_mortgaged, v_owner_id, v_game_id, rent
+        into v_cell_type, v_color_group, v_owner_id, v_game_id, rent
         from "ВЛАДЕНИЯ" v
         join "КЛЕТКИ" c
       on c."ID_КЛЕТКИ" = v."ID_КЛЕТКИ"
        where v."ID_ВЛАДЕНИЯ" = p_ownership_id;
-      if v_mortgaged = 1 then
-         return 0;
-      end if;
       if v_cell_type = 'Коммунальная' then
          select count(*) into v_count
            from "ВЛАДЕНИЯ" v
@@ -900,21 +870,15 @@ create or replace package body monopoly as
       v_game_id number;
       v_ownership_id number;
       v_owner_id number;
-      v_mortgaged number;
       rent number;
       recipient_login "ПОЛЬЗОВАТЕЛИ"."ЛОГИН"%type;
    begin
       v_game_id := participant_game(p_participant_id);
-      select "ID_ВЛАДЕНИЯ", "ID_ВЛАДЕЛЬЦА", "ЗАЛОЖЕНА"
-        into v_ownership_id, v_owner_id, v_mortgaged
+      select "ID_ВЛАДЕНИЯ", "ID_ВЛАДЕЛЬЦА"
+        into v_ownership_id, v_owner_id
         from "ВЛАДЕНИЯ"
        where "ID_ИГРЫ" = v_game_id
          and "ID_КЛЕТКИ" = p_cell_id;
-      if v_owner_id is null
-      or v_owner_id = p_participant_id
-      or v_mortgaged = 1 then
-         raise_application_error(-20075, 'Аренда не требуется');
-      end if;
       rent := calculate_rent(v_ownership_id, p_dice);
       update "УЧАСТНИКИ"
          set "БАЛАНС" = "БАЛАНС" - rent
@@ -1232,25 +1196,14 @@ create or replace package body monopoly as
 
    procedure start_auction(p_game_id number, p_cell_id number) is
       v_price number;
-      v_owner_id number;
-      v_turn_state varchar2(40);
    begin
-      select "КОД_СОСТОЯНИЯ_ХОДА" into v_turn_state
-        from "ИГРЫ"
-       where "ID_ИГРЫ" = p_game_id;
-      if v_turn_state is null or v_turn_state <> 'ОЖИДАНИЕ_ПОКУПКИ' then
-         raise_application_error(-20090, 'Аукцион нельзя начать');
-      end if;
-      select v."ID_ВЛАДЕЛЬЦА", c."ЦЕНА_ПОКУПКИ"
-        into v_owner_id, v_price
+      select c."ЦЕНА_ПОКУПКИ"
+        into v_price
         from "ВЛАДЕНИЯ" v
         join "КЛЕТКИ" c
       on c."ID_КЛЕТКИ" = v."ID_КЛЕТКИ"
        where v."ID_ИГРЫ" = p_game_id
          and v."ID_КЛЕТКИ" = p_cell_id;
-      if v_owner_id is not null then
-         raise_application_error(-20092, 'Клетка куплена');
-      end if;
       insert into "АУКЦИОНЫ" ("ID_ИГРЫ", "ID_КЛЕТКИ", "КОД_СТАТУСА_АУКЦИОНА", "СТАРТ_ЦЕНА", "ДАТА_НАЧАЛА") values
          (p_game_id, p_cell_id, 'АКТИВЕН', floor(v_price / 2), sysdate);
       update "ИГРЫ"
@@ -1405,7 +1358,7 @@ create or replace package body monopoly as
             set "КОЛ_ТАЙМАУТОВ" = 2
           where "ID_УЧАСТНИКА" = v_participant_id;
          add_action(p_game_id, v_participant_id, null, 'ТАЙМ_АУТ', null);
-         declare_bankruptcy(v_participant_id, c_bankruptcy_second_timeout);
+         declare_bankruptcy(v_participant_id);
       else
          update "УЧАСТНИКИ"
             set "КОЛ_ТАЙМАУТОВ" = 1, "БАЛАНС" = "БАЛАНС" - c_timeout_penalty
@@ -1428,18 +1381,17 @@ create or replace package body monopoly as
       v_game_status varchar2(40);
       v_auction_id number;
       v_participant_id number;
-      host_id number;
    begin
       lock_game(p_game_id);
-      select "КОД_СОСТОЯНИЯ_ХОДА", "ВРЕМЯ_НАЧАЛА_ХОДА", "КОД_СТАТУСА_ИГРЫ", "ID_ТЕКУЩЕГО_УЧАСТНИКА", "ID_ХОСТА"
-        into v_turn_state, started, v_game_status, v_participant_id, host_id
+      select "КОД_СОСТОЯНИЯ_ХОДА", "ВРЕМЯ_НАЧАЛА_ХОДА", "КОД_СТАТУСА_ИГРЫ", "ID_ТЕКУЩЕГО_УЧАСТНИКА"
+        into v_turn_state, started, v_game_status, v_participant_id
         from "ИГРЫ"
        where "ID_ИГРЫ" = p_game_id;
       if v_game_status = 'ПРОВЕРКА_ГОТОВНОСТИ' then
          if started is not null
             and sysdate >= started + c_ready_seconds / 86400
          then
-            start_game(p_game_id, host_id);
+            start_game(p_game_id);
          end if;
          return;
       end if;
@@ -1453,7 +1405,7 @@ create or replace package body monopoly as
       elsif v_turn_state = 'ПОКРЫТИЕ_ДОЛГА'
          and sysdate >= started + c_turn_minutes / 1440
       then
-         declare_bankruptcy(v_participant_id, c_bankruptcy_debt_timeout);
+         declare_bankruptcy(v_participant_id);
       elsif v_turn_state = 'ПРОВЕДЕНИЕ_АУКЦИОНА' then
          begin
             select "ID_АУКЦИОНА" into v_auction_id
@@ -1470,22 +1422,12 @@ create or replace package body monopoly as
 
    procedure finish_game(p_game_id number, p_winner_id number default null) is
       v_status varchar2(40);
-      v_count number;
    begin
       select "КОД_СТАТУСА_ИГРЫ" into v_status
         from "ИГРЫ"
        where "ID_ИГРЫ" = p_game_id;
       if v_status in ('ЗАВЕРШЕНА', 'ЗАБРОШЕНА') then
          return;
-      end if;
-      if p_winner_id is not null then
-         select count(*) into v_count
-           from "УЧАСТНИКИ"
-          where "ID_УЧАСТНИКА" = p_winner_id
-            and "ID_ИГРЫ" = p_game_id;
-         if v_count = 0 then
-            raise_application_error(-20100, 'Победитель из другой игры');
-         end if;
       end if;
       update "АУКЦИОНЫ"
          set "КОД_СТАТУСА_АУКЦИОНА" = 'НЕ_СОСТОЯЛСЯ', "ДАТА_ОКОНЧАНИЯ" = sysdate
@@ -1510,15 +1452,12 @@ create or replace package body monopoly as
       end if;
    end;
 
-   procedure declare_bankruptcy(p_participant_id number, p_reason varchar2) is
+   procedure declare_bankruptcy(p_participant_id number) is
       v_game_id number;
       v_balance number;
       v_current_player_id number;
       v_game_status varchar2(40);
    begin
-      if p_reason is null or p_reason not in (c_bankruptcy_debt_timeout, c_bankruptcy_second_timeout) then
-         raise_application_error(-20101, 'Неизвестная причина');
-      end if;
       select u."ID_ИГРЫ", u."БАЛАНС", x."ID_ТЕКУЩЕГО_УЧАСТНИКА"
         into v_game_id, v_balance, v_current_player_id
         from "УЧАСТНИКИ" u
@@ -1569,8 +1508,8 @@ create or replace package body monopoly as
       auction_id number;
    begin
       v_game_id := lock_participant_game(p_participant_id);
-      select u."ID_ИГРЫ", x."ID_ТЕКУЩЕГО_УЧАСТНИКА", x."КОД_СТАТУСА_ИГРЫ"
-        into v_game_id, v_current_player_id, v_game_status
+      select x."ID_ТЕКУЩЕГО_УЧАСТНИКА", x."КОД_СТАТУСА_ИГРЫ"
+        into v_current_player_id, v_game_status
         from "УЧАСТНИКИ" u
         join "ИГРЫ" x
       on x."ID_ИГРЫ" = u."ID_ИГРЫ"
@@ -1598,8 +1537,6 @@ create or replace package body monopoly as
       select max("ID_АУКЦИОНА") into auction_id from "АУКЦИОНЫ"
        where "ID_ИГРЫ" = v_game_id and "КОД_СТАТУСА_АУКЦИОНА" = 'АКТИВЕН';
       if auction_id is not null then
-         -- Инициатор остаётся текущим до закрытия торгов.
-         -- При выходе другого игрока проверяем, ответили ли все оставшиеся.
          close_auction(auction_id, v_current_player_id = p_participant_id);
       elsif v_current_player_id = p_participant_id then
          advance_to_next_player(v_game_id);
@@ -1681,8 +1618,6 @@ create or replace package body monopoly as
       return v_result;
    end;
 
-   -- Вызывается клиентом только для собственного участника.
-   -- Блокировка игры сериализует heartbeat, выход и определение победителя.
    procedure heartbeat(p_participant_id number) is
       v_game_id number;
       v_status varchar2(40);
@@ -1698,7 +1633,6 @@ create or replace package body monopoly as
           where "ID_ИГРЫ" = v_game_id
             and "КОД_СТАТУСА_УЧАСТНИКА" = 'АКТИВЕН'
             and "ПОСЛЕДНЯЯ_СВЯЗЬ" > v_now - c_disconnect_seconds / 86400;
-         -- Если отсутствовали все, нельзя объявлять последнего в цикле победителем.
          if v_connected = 0 then
             finish_game(v_game_id, null);
          end if;
@@ -1712,7 +1646,6 @@ create or replace package body monopoly as
             disconnect_player(player."ID_УЧАСТНИКА");
          end loop;
       end if;
-      -- Проверяем истечение срока ДО обновления: исключённый не воскресает.
       update "УЧАСТНИКИ" set "ПОСЛЕДНЯЯ_СВЯЗЬ" = v_now
        where "ID_УЧАСТНИКА" = p_participant_id
          and "КОД_СТАТУСА_УЧАСТНИКА" in ('В_ЛОББИ', 'АКТИВЕН', 'БАНКРОТ');
