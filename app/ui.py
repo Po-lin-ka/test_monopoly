@@ -19,9 +19,6 @@ from .db import ConnectionLost, Database, DatabaseError
 from .service import GameService
 from .snapshot import ReconnectThread, SnapshotThread
 
-APP_VERSION = "2026.09.21-17"
-
-
 RULES_TEXT = """
 Цель игры
 Остаться единственным небанкротом. Перед началом общий банк 1200 ₽ делится поровну
@@ -635,7 +632,7 @@ class Window(QMainWindow):
         super().__init__()
         self.resize(1760, 1060)
         self.setMinimumSize(1280, 800)
-        self.setWindowTitle(f"Монополия · версия {APP_VERSION}")
+        self.setWindowTitle(f"Монополия")
         self.setStyleSheet(STYLE)
         self.db = Database()
         self.s = GameService(self.db)
@@ -1670,7 +1667,7 @@ def main():
     translator.load("qtbase_ru", QLibraryInfo.location(QLibraryInfo.TranslationsPath))
     app.installTranslator(translator)
     try:
-        print(f"Запущена Монополия, версия интерфейса {APP_VERSION}")
+        print(f"Запущена Монополия")
         window = Window()
         window.showMaximized()
         return app.exec_()

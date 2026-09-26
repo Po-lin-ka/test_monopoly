@@ -6,3 +6,6 @@ __pycache__/
 .vscode/
 .codex
 .agents
+.venv-windows/
+connection.json
+connection_for_player2.json
