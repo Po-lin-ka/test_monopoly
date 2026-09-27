@@ -1,35 +1,13 @@
 @echo off
-setlocal
 chcp 65001 >nul
-pushd "%~dp0"
-if errorlevel 1 exit /b 1
-if exist ".venv\Scripts\python.exe" goto install
-py -3.12 -c "import struct; assert struct.calcsize('P') == 8" >nul 2>&1
-if not errorlevel 1 goto py_launcher
-python -c "import sys,struct; assert sys.version_info[:2] == (3,12) and struct.calcsize('P') == 8" >nul 2>&1
-if not errorlevel 1 goto python
- echo Нужен Python 3.12 x64. Установите его с опцией Add python.exe to PATH.
-goto failure
-:py_launcher
+cd /d "%~dp0" || exit /b 1
 py -3.12 -m venv .venv
 if errorlevel 1 goto failure
-goto install
-:python
-python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 if errorlevel 1 goto failure
-:install
-".venv\Scripts\python.exe" -c "import sys,struct; assert sys.version_info[:2] == (3,12) and struct.calcsize('P') == 8"
-if errorlevel 1 goto wrong_version
-".venv\Scripts\python.exe" -m pip install -r requirements.txt
-if errorlevel 1 goto failure
-echo Окружение готово. Укажите параметры Oracle в файле .env.
+echo Окружение готово. Параметры Oracle укажите в .env.
 pause
-popd
 exit /b 0
-:wrong_version
-echo В .venv другое окружение. Переименуйте эту папку и повторите запуск.
 :failure
-echo Подготовка не завершена. Сохраните сообщение об ошибке выше.
 pause
-popd
 exit /b 1
