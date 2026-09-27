@@ -3,9 +3,9 @@ setlocal
 chcp 65001 >nul
 pushd "%~dp0"
 if errorlevel 1 exit /b 1
-if not exist ".venv-windows\Scripts\python.exe" goto no_environment
+if not exist ".venv\Scripts\python.exe" goto no_environment
 if not exist .env goto no_config
-".venv-windows\Scripts\python.exe" -m app.main
+".venv\Scripts\python.exe" -m app.main
 if errorlevel 1 goto failure
 popd
 exit /b 0
@@ -13,7 +13,7 @@ exit /b 0
 echo Сначала запустите 1_Подготовить_окружение.bat.
 goto failure
 :no_config
-echo Скопируйте .env.example в .env и заполните параметры Oracle.
+echo Создайте файл .env в папке проекта и заполните параметры Oracle по инструкции ПРОВЕРЯЮЩИМ.md.
 :failure
 echo Игра не запущена или завершилась с ошибкой. Сохраните сообщение выше.
 pause
