@@ -15,7 +15,7 @@ files.extend(root / name for name in (
     'ПРОВЕРЯЮЩИМ.md',
 ))
 config = '''# Укажите параметры рабочего подключения Oracle. У всех игроков они одинаковые.
-ORACLE_USER=KS2318_03
+ORACLE_USER="ВАШ_ПОЛЬЗОВАТЕЛЬ_ORACLE_DSN"
 ORACLE_PASSWORD="ВАШ_ПАРОЛЬ_ORACLE"
 ORACLE_DSN="(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=10.22.10.41)(PORT=1521))(CONNECT_DATA=(SID=ORCL)))"
 POLL_INTERVAL_MS=2000
