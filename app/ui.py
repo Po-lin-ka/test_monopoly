@@ -1667,7 +1667,6 @@ def main():
     translator.load("qtbase_ru", QLibraryInfo.location(QLibraryInfo.TranslationsPath))
     app.installTranslator(translator)
     try:
-        print(f"Запущена Монополия")
         window = Window()
         window.showMaximized()
         return app.exec_()
