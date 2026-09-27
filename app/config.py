@@ -2,7 +2,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(encoding='utf-8-sig')
 @dataclass(frozen=True)
 class Settings:
     user: str=os.getenv('ORACLE_USER','monopoly')

@@ -24,14 +24,29 @@ CALL_TIMEOUT_MS=5000
 '''
 output = root / 'Передать_проверяющим.zip'
 temporary = output.with_suffix('.tmp')
+
+
+def windows_text(text):
+    return text.replace('\r\n', '\n').replace('\n', '\r\n').encode('utf-8-sig')
+
+
 with ZipFile(temporary, 'w', ZIP_DEFLATED) as archive:
     for path in sorted(files):
-        archive.write(path, str(Path('Monopoly') / path.relative_to(root)))
-    archive.writestr('Monopoly/.env', config.encode('utf-8'))
+        name = str(Path('Monopoly') / path.relative_to(root))
+        if path.suffix == '.md':
+            archive.writestr(name, windows_text(path.read_text(encoding='utf-8-sig')))
+        else:
+            archive.write(path, name)
+    archive.writestr('Monopoly/.env', windows_text(config))
 with ZipFile(temporary) as archive:
     assert archive.testzip() is None
     names = archive.namelist()
-    assert archive.read('Monopoly/.env') == config.encode('utf-8')
+    assert archive.read('Monopoly/.env') == windows_text(config)
+    for name in ('Monopoly/.env', 'Monopoly/ПРОВЕРЯЮЩИМ.md'):
+        data = archive.read(name)
+        assert data.startswith(b'\xef\xbb\xbf')
+        assert b'\r\n' in data
+        assert b'\n' not in data.replace(b'\r\n', b'')
     assert not any(
         part in ('.git', '.venv', '.venv-windows', '__pycache__', 'launcher')
         for name in names for part in Path(name).parts
