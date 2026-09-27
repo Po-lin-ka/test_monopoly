@@ -7,7 +7,7 @@ files = []
 for folder in ('app', 'database', 'launcher'):
     files.extend(p for p in (root/folder).rglob('*') if p.is_file() and '__pycache__' not in p.parts and p.suffix != '.pyc')
 files.extend(root/name for name in (
-    'requirements.txt', '1_Создать_базу_и_играть.bat', '2_Подключиться_и_играть.bat',
+    'requirements.txt', '.env.example', '1_Подготовить_окружение.bat', '2_Запустить_игру.bat',
     'ПРОВЕРЯЮЩИМ.md', 'ПИМ_Упрощённая_монополия.docx', 'ПИМ_Упрощённая_монополия.pdf',
 ))
 with ZipFile(root/'Передать_проверяющим.zip', 'w', ZIP_DEFLATED) as archive:
